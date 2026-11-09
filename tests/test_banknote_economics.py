@@ -32,16 +32,122 @@ class EconomicTests(unittest.TestCase):
         self.assertEqual(r['probable_issue_date'], 'c. 1900')
         self.assertIn('estimate',r['issue_basis'])
 
-    def test_series_date_not_assumed_to_be_actual_release(self):
+    def test_series_date_compares_buying_power_without_claiming_actual_release(self):
         n = dict(country='USA', denomination='5 Dollars', date_1=1900,series='Series of 1900')
         r = e.calculate(n,self.data,NOW)
-        self.assertIsNone(r['at_issue']); self.assertEqual(r['today'],5)
+        self.assertEqual(r['at_issue'],100); self.assertEqual(r['today'],5)
+        self.assertEqual(r['comparison_year'], '1900')
+        self.assertIn('not a verified issue date', r['comparison_basis'])
+        self.assertEqual(r['probable_issue_date'], 'Not established')
         n['issue_date']='1960'
-        self.assertEqual(e.calculate(n,self.data,NOW)['at_issue'],50)
+        updated = e.calculate(n,self.data,NOW)
+        self.assertEqual(updated['at_issue'],100)
+        self.assertEqual(updated['probable_issue_date'], '1960')
 
-    def test_issue_range_uses_all_years_and_extremes_not_only_endpoints(self):
-        n = dict(country='England',denomination='1 Pound',date_1=1980,issue_date='1980–1982')
+    def test_series_range_uses_all_years_and_extremes_not_only_endpoints(self):
+        n = dict(country='England',denomination='1 Pound',date_1_text='1980–1982',issue_date='1990')
         self.assertEqual(e.calculate(n,self.data,NOW)['at_issue'], [6.25,12.5])
+        self.assertEqual(e.calculate(n,self.data,NOW)['comparison_year'], '1980–1982')
+
+    def test_primary_year_series_fallback_conflicts_and_calendar_boundaries(self):
+        base = dict(country='England', denomination='1 Pound', date_1=1981)
+        family = e.calculate(dict(base, series='1980–1982 issue family'), self.data, NOW)
+        self.assertEqual(family['comparison_year'], '1981')
+        self.assertEqual(family['at_issue'], 12.5)
+        fallback = e.calculate(dict(base, date_1=None, series='Series of 1981'), self.data, NOW)
+        self.assertEqual(fallback['at_issue'], 12.5)
+        for changed in (dict(series='Series of 1980'), dict(series='1970–1980 issue family'),
+                        dict(date_1_text='1980 / 1982'), dict(date_1_text='1982–1980'),
+                        dict(date_1_text='AH 1400', series=None),
+                        dict(date_1=None, series='Series of 1980 and 1982')):
+            with self.subTest(changed=changed):
+                result = e.calculate(dict(base, **changed), self.data, NOW)
+                self.assertIsNone(result['at_issue'])
+                self.assertEqual(result['comparison_year'], 'Unavailable')
+        law = e.calculate(dict(base, date_1_text='Act of 1981'), self.data, NOW)
+        self.assertEqual(law['at_issue'], 12.5)
+        self.assertEqual(law['probable_issue_date'], 'Not established')
+        self.assertIn('Printed law year', law['comparison_basis'])
+
+    def test_1917_dollars_use_series_year_and_packaged_current_cpi(self):
+        note = dict(country='United States', issuer='United States Treasury',
+                    denomination='2 Dollars', date_1=1917, series='Series of 1917')
+        result = e.calculate(note, e.snapshot(tempfile.mkdtemp()), NOW)
+        self.assertAlmostEqual(result['at_issue'], 2 * 1001.3 / 38.5)
+        self.assertEqual(result['at_issue_display'], '≈ $52.02')
+        self.assertEqual(result['today'], 2)
+        self.assertEqual(result['probable_issue_date'], 'Not established')
+        self.assertIn('current CPI estimate', result['data_dates'])
+
+    def test_connecticut_1776_face_value_uses_local_ratio_and_common_cpi_base(self):
+        note = dict(country='Connecticut Colony', issuer='Colony of Connecticut',
+                    denomination='1 Shilling', date_1=1776)
+        data = e.snapshot(tempfile.mkdtemp())
+        before = json.dumps((note, data), sort_keys=True)
+        result = e.calculate(note, data, NOW)
+        expected = (1 / 6) * (1001.3 / ((290 + 299.3 + 312.2) / 3) * 100) / 8.735
+        self.assertAlmostEqual(result['at_issue'], expected)
+        self.assertEqual(result['at_issue_display'], '≈ $6.36')
+        self.assertIsNone(result['today'])
+        self.assertEqual(result['today_display'], 'Unavailable')
+        self.assertIn('Obsolete Connecticut currency', result['note'])
+        self.assertIn('paper-money discounts are not measured', result['note'])
+        self.assertEqual({source['url'] for source in result['sources']},
+                         {e.FED_URL, e.CONNECTICUT_CURRENCY_URL, e.HISTORICAL_US_CPI_URL})
+        self.assertIn('historical CPI estimate', result['data_dates'])
+        self.assertEqual(json.dumps((note, data), sort_keys=True), before)
+        # Changing a same-base modern index by a scale factor must not change
+        # the historical result, and the incompatible 1800 splice is irrelevant.
+        data['cpi']['USA']['current']['value'] *= 2
+        for year in ('1982', '1983', '1984'):
+            data['cpi']['USA']['values'][year] *= 2
+        data['cpi']['USA']['values']['1800'] = 99999
+        self.assertAlmostEqual(e.calculate(note, data, NOW)['at_issue'], expected)
+
+    def test_connecticut_rule_does_not_apply_to_other_shillings_or_missing_cpi(self):
+        base = dict(country='Connecticut Colony', issuer='Colony of Connecticut',
+                    denomination='1 Shilling', date_1=1776)
+        data = e.snapshot(tempfile.mkdtemp())
+        for changed in (dict(country='New York Colony'), dict(country='East Africa'),
+                        dict(country='Connecticut'), dict(issuer='State of Connecticut'),
+                        dict(issuer='Continental Congress'), dict(issuer=''),
+                        dict(date_1=1775), dict(date_1=1777), dict(issue_type='Private / Scrip'),
+                        dict(denomination='1 Sterling Shilling'), dict(series='Old tenor')):
+            with self.subTest(changed=changed):
+                result = e.calculate(dict(base, **changed), data, NOW)
+                self.assertIsNone(result['at_issue'])
+                self.assertIsNone(result['today'])
+        for value in (None, 0, float('nan')):
+            with self.subTest(anchor=value):
+                data['cpi']['USA']['values']['1983'] = value
+                self.assertIsNone(e.calculate(base, data, NOW)['at_issue'])
+        data = e.snapshot(tempfile.mkdtemp())
+        data['cpi']['USA']['current']['period'] = '2020'
+        self.assertIsNone(e.calculate(base, data, NOW)['at_issue'])
+        data['cpi']['USA']['current']['period'] = '2026'
+        for value in (None, 0, True, float('nan'), float('inf')):
+            data['cpi']['USA']['current']['value'] = value
+            self.assertIsNone(e.calculate(base, data, NOW)['at_issue'])
+
+    def test_fractional_year_cannot_enter_the_connecticut_rule_or_us_estimate(self):
+        data = e.snapshot(tempfile.mkdtemp())
+        cases = (
+            (dict(country='Connecticut Colony', issuer='Colony of Connecticut',
+                  denomination='1 Shilling'), 1776),
+            (dict(country='United States', denomination='2 Dollars'), 1917),
+        )
+        for note, year in cases:
+            for field, value in (('date_1', year + .5), ('date_1_text', str(year) + '.5'),
+                                 ('series', 'Series of ' + str(year) + '.5')):
+                with self.subTest(year=year, field=field):
+                    result = e.calculate(dict(note, **{field: value}), data, NOW)
+                    self.assertIsNone(result['at_issue'])
+                    self.assertEqual(result['comparison_year'], 'Unavailable')
+                    self.assertIn('whole Gregorian year', result['comparison_basis'])
+            for value in (year, float(year), str(year) + '.0', str(year) + '.05.10',
+                          'May 10, ' + str(year)):
+                with self.subTest(year=year, value=value):
+                    self.assertIsNotNone(e.calculate(dict(note, date_1_text=value), data, NOW)['at_issue'])
 
     def test_historical_units_and_regime_boundaries_are_not_conflated(self):
         for n in [dict(country='Brazil',denomination='10 Mil Reis',date_1=1925),
@@ -127,10 +233,15 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(self.client.get('/banknotes/economic/economics').status_code,404)
 
     def test_probable_issue_date_saves_independently_of_catalogue_year(self):
+        before = self.client.get('/banknotes/economic/economics').get_json()
         saved=self.client.post('/banknotes/economic/save-field',json={'field':'issue_date','value':'1936–1938'})
         self.assertEqual(saved.status_code,200)
         row=self.db.execute("SELECT * FROM banknotes WHERE id='economic'").fetchone()
         self.assertEqual(row['issue_date'],'1936–1938');self.assertEqual(row['date_1'],1935)
+        after = self.client.get('/banknotes/economic/economics').get_json()
+        self.assertEqual(after['comparison_year'], '1935')
+        self.assertEqual(after['at_issue'], before['at_issue'])
+        self.assertEqual(after['probable_issue_date'], '1936–1938')
 
 
 if __name__=='__main__':unittest.main()

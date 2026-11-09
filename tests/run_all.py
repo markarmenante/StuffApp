@@ -18,6 +18,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_detail_upload_ack.py', 'test_
          'test_banknote_feedback.py',
          'test_status_default_own.py',
          'test_coin_filter_axes.py',
+         'test_coin_economics.py', 'test_banknote_economics.py', 'test_banknote_historical_economics.py',
          'test_ebay_matching.py',
          'test_banknote_serial_scan.py',
          'test_country_history_placeholder.py',

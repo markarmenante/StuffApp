@@ -23,6 +23,8 @@ import market_checkout
 import market_purchase_capture
 import banknote_catalog
 import banknote_economics
+import coin_economics
+import precious_metals
 import banknote_catalog_lookup
 import banknote_catalog_search
 import banknote_catalog_proposals
@@ -1542,6 +1544,9 @@ FIELDS = {
         {'name': 'official',        'label': 'Official',          'type': 'text'},
         {'name': 'denomination',    'label': 'Denomination',      'type': 'text'},
         {'name': 'metal',           'label': 'Metal',             'type': 'text'},
+        {'name': 'fineness',        'label': 'Fineness (fraction)', 'type': 'number', 'readonly': True},
+        {'name': 'fineness_basis',  'label': 'Fineness basis',     'type': 'text', 'readonly': True},
+        {'name': 'fineness_source', 'label': 'Fineness source',    'type': 'text', 'readonly': True},
         {'name': 'mint',            'label': 'Mint',              'type': 'text'},
         {'name': 'date_1',          'label': 'Date From (year, negative=BC)', 'type': 'number'},
         {'name': 'date_1_text',     'label': 'Date From (text)',  'type': 'text'},
@@ -5959,6 +5964,12 @@ def banknote_entity_pills(db, visible_rows, show_history=True):
 app.jinja_env.globals['banknote_catalog_groups'] = banknote_catalog.GROUPS
 app.jinja_env.globals['banknote_economic_summary'] = lambda row: banknote_economics.calculate(
     dict(row) if row else {}, banknote_economics.snapshot(DATA_DIR))
+def coin_economic_summary(row):
+    inputs = precious_metals.snapshot(DATA_DIR)
+    inputs['cpi'] = banknote_economics.snapshot(DATA_DIR).get('cpi', {})
+    return coin_economics.calculate(dict(row) if row else {}, inputs)
+
+app.jinja_env.globals['coin_economic_summary'] = coin_economic_summary
 app.jinja_env.globals['banknote_distribution_callout'] = banknote_catalog.distribution_callout
 
 
@@ -6110,6 +6121,10 @@ def init_db():
         'ALTER TABLE banknotes ADD COLUMN issue_date TEXT',
         'ALTER TABLE coins ADD COLUMN official TEXT',
         'ALTER TABLE coins ADD COLUMN specs_searched_at TEXT',
+        'ALTER TABLE coins ADD COLUMN fineness REAL CHECK (fineness > 0 AND fineness <= 1)',
+        'ALTER TABLE coins ADD COLUMN fineness_basis TEXT',
+        'ALTER TABLE coins ADD COLUMN fineness_source TEXT',
+        'ALTER TABLE coins ADD COLUMN fineness_identity TEXT',
         'ALTER TABLE coins ADD COLUMN grading_authority TEXT',
         'ALTER TABLE coins ADD COLUMN slab_number TEXT',
         'ALTER TABLE coins ADD COLUMN grade_condition TEXT',
@@ -26654,7 +26669,7 @@ COIN_SPEC_FILLABLE = ('region', 'mint', 'authority', 'official', 'denomination',
                       'date_1', 'date_2', 'weight', 'size', 'die_axis', 'grade',
                       'strike', 'surface', 'sheldon', 'grading_authority', 'slab_number',
                       'grade_condition', 'grade_modifier', 'obv_rev', 'coin_references',
-                      'vendor', 'price', 'purchase_date')
+                      'vendor', 'price', 'purchase_date', 'fineness')
 
 COIN_SPECS_RESPONSE_SCHEMA = {
     'type': 'object',
@@ -27038,7 +27053,7 @@ def fetch_coin_specs(coin, provider='anthropic'):
 
     known = {}
     for f in COIN_SPEC_FILLABLE:
-        v = coin[f]
+        v = _coin_row_value(coin, f)
         if v not in (None, ''):
             known[f] = v
 
@@ -27236,6 +27251,14 @@ def coin_lookup_specs(record_id):
 
     if not isinstance(suggestions, dict):
         suggestions = {}
+    # Purity is a sourced type-specific proposal, never a generic model guess.
+    suggestions.pop('fineness', None)
+    researched_fineness = coin_economics.researched_fineness(dict(coin))
+    if researched_fineness and all(coin[field] in (None, '') for field in coin_economics.FINENESS_FIELDS):
+        suggestions['fineness'] = researched_fineness['fineness']
+        suggestions['sources'] = str(suggestions.get('sources') or '') + (
+            '\nFineness: 99% published type estimate for classical Athenian tetradrachms; '
+            'specimen unassayed. Healy (1974), p. 29 n. 68: ' + researched_fineness['fineness_source'])
     for field, value in _coin_description_measurements(coin).items():
         if value is not None:
             suggestions[field] = value
@@ -27481,16 +27504,24 @@ def coin_apply_lookup_specs(record_id):
     cat_id assignment + group resequencing if date_1 changes — the
     same housekeeping the old lookup endpoint did inline.
     """
+    require_owner()
     db = get_db()
     coin = db.execute("SELECT * FROM coins WHERE id = ?",
                       (record_id,)).fetchone()
-    if not coin:
+    if not coin or not _user_can_see_row('coins', coin):
         return jsonify({'error': 'Coin not found'}), 404
     data = request.get_json(force=True) or {}
     raw = data.get('updates') or {}
     if not isinstance(raw, dict):
         return jsonify({'error': 'updates must be an object'}), 400
+    if 'fineness' in raw:
+        db.execute('BEGIN IMMEDIATE')
+        coin = db.execute('SELECT * FROM coins WHERE id=?', (record_id,)).fetchone()
+        if not coin or not _user_can_see_row('coins', coin):
+            db.rollback()
+            return jsonify({'error': 'Coin not found'}), 404
     updates = _coin_apply_spec_updates(db, coin, raw, record_id)
+    db.commit()
     return jsonify({
         'updated': len(updates),
         'fields': list(updates.keys()),
@@ -27573,13 +27604,16 @@ def _coin_apply_spec_updates(db, coin, raw, record_id, only_empty=False, skip=()
     for k, v in raw.items():
         if k not in COIN_SPEC_FILLABLE or k in skip:
             continue
+        if k == 'fineness':
+            continue  # Apply the complete verified provenance tuple below.
         if only_empty and coin[k] not in (None, ''):
             continue
         coerced = _coerce(k, v)
         if coerced in (None, ''):
             continue
         updates[k] = coerced
-    if not updates:
+    wants_fineness = 'fineness' in raw and 'fineness' not in skip
+    if not updates and not wants_fineness:
         return {}
 
     # The detail template prefers date_1_text / date_2_text for
@@ -27598,6 +27632,13 @@ def _coin_apply_spec_updates(db, coin, raw, record_id, only_empty=False, skip=()
         updates['date_1_text'] = _date_text(updates['date_1'])
     if 'date_2' in updates:
         updates['date_2_text'] = _date_text(updates['date_2'])
+
+    if wants_fineness and all(coin[field] in (None, '') for field in coin_economics.FINENESS_FIELDS):
+        evidence = coin_economics.researched_fineness(dict(dict(coin), **updates))
+        if evidence and raw['fineness'] == evidence['fineness']:
+            updates.update(evidence)
+    if not updates:
+        return {}
 
     set_clause = ', '.join(f'{k} = ?' for k in updates.keys())
     now = datetime.utcnow().isoformat()
@@ -28546,6 +28587,65 @@ def banknote_economic_context(record_id):
         abort(404)
     banknote_economics.request_refresh(DATA_DIR)
     return jsonify(banknote_economics.calculate(dict(note), banknote_economics.snapshot(DATA_DIR)))
+
+
+@app.get('/coins/<record_id>/economics')
+def coin_economic_context(record_id):
+    coin = get_db().execute('SELECT * FROM coins WHERE id=?', (record_id,)).fetchone()
+    if not coin or not _user_can_see_row('coins', coin):
+        abort(404)
+    refreshing = precious_metals.request_refresh(DATA_DIR)
+    banknote_economics.request_refresh(DATA_DIR)
+    return jsonify(dict(coin_economic_summary(coin), quote_refreshing=refreshing))
+
+
+@app.post('/coins/<record_id>/fineness')
+def coin_save_fineness(record_id):
+    require_owner()
+    db = get_db()
+    db.execute('BEGIN IMMEDIATE')
+    coin = db.execute('SELECT * FROM coins WHERE id=?', (record_id,)).fetchone()
+    if not coin or not _user_can_see_row('coins', coin):
+        db.rollback()
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        db.rollback()
+        return jsonify(error='Expected an object'), 400
+    if data.get('action') == 'research':
+        if any(coin[field] not in (None, '') for field in coin_economics.FINENESS_FIELDS):
+            db.rollback()
+            return jsonify(error='Recorded fineness was retained. Use the editor for an explicit correction.'), 409
+        updates = coin_economics.researched_fineness(dict(coin))
+        if not updates:
+            db.rollback()
+            return jsonify(error='No verified fineness source matches this exact type and period. Add a documented value manually.'), 422
+        db.rollback()
+        return jsonify(ok=True, proposal=updates,
+                       message='99% published type estimate; specimen unassayed. Review the source and select Save fineness to record it.')
+    elif data.get('action') == 'save':
+        if data.get('expected_identity') != coin_economics.identity(dict(coin)):
+            db.rollback()
+            return jsonify(error='The coin identity changed. Reload and verify the fineness source again.'), 409
+        if data.get('expected_fineness') != coin_economics.fineness_state(dict(coin)):
+            db.rollback()
+            return jsonify(error='Fineness was edited elsewhere. Reload before making a correction.'), 409
+        try:
+            if isinstance(data.get('percent'), bool):
+                raise ValueError('Invalid percentage')
+            percent = float(data.get('percent'))
+            updates = coin_economics.fineness_record(percent / 100, data.get('basis'), data.get('source'), dict(coin))
+        except (TypeError, ValueError):
+            db.rollback()
+            return jsonify(error='Enter purity above 0% and at most 100%, a basis, and an HTTPS source URL.'), 400
+    else:
+        db.rollback()
+        return jsonify(error='Unknown fineness action'), 400
+    db.execute('UPDATE coins SET fineness=?, fineness_basis=?, fineness_source=?, fineness_identity=?, updated_at=? WHERE id=?',
+               [updates[key] for key in (*coin_economics.FINENESS_FIELDS, 'fineness_identity')]
+               + [datetime.utcnow().isoformat(), record_id])
+    db.commit()
+    return jsonify(ok=True, values=updates)
 
 
 @app.route('/banknotes/<record_id>/lookup-specs', methods=['POST'])

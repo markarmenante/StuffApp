@@ -1170,6 +1170,8 @@ document.addEventListener('DOMContentLoaded', function () {
   {% include 'partials/market_purchase_capture.html' %}
   {% include 'partials/original_listing.html' %}
 
+  {% include 'partials/coin_economics.html' %}
+
   <!-- Description -->
   <div class="section-bar">Description</div>
   {% set _desc = val('description') %}
@@ -3896,7 +3898,9 @@ function showLookupReview(applyUrl, filled, overwritten, sources, options = {}) 
     wrap.className = 'lookup-review-row';
     const fmt = v => {
       if (v === null || v === undefined) return '';
-      const s = Array.isArray(v) ? v.join(', ') : String(v);
+      const s = field === 'fineness' && typeof v === 'number'
+        ? `${v * 100}% (published type estimate; specimen unassayed)`
+        : Array.isArray(v) ? v.join(', ') : String(v);
       // Insert a space after commas so long comma-lists can wrap naturally.
       return s.replace(/,(?!\s)/g, ', ');
     };
@@ -7786,6 +7790,8 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
       if (field === 'date_1_text') setCoinFormValue('date_1', value, options);
       if (field === 'date_2_text') setCoinFormValue('date_2', value, options);
     });
+    if (Object.hasOwn(values, 'fineness')) document.dispatchEvent(
+      new CustomEvent('record-field-saved', {detail: {field: 'fineness'}}));
     // A Check-filled price runs through the blur formatter: the server
     // already appended the USD tail when it could reach a rate; this
     // covers the miss (and mirrors the sell panel's purchase price).
@@ -8214,7 +8220,7 @@ document.querySelectorAll('.dyn-doc-row').forEach(function setupDynDocRow(row) {
     }
 
     const applyUrl = url.replace('/lookup-specs', '/apply-lookup-specs');
-    if (!Object.keys(overwritten).length) {
+    if (!Object.keys(overwritten).length && !Object.hasOwn(filled, 'fineness')) {
       const d = await applyLookupUpdates(applyUrl, filled, {
         ignoreApplyFailure: checkpoint ? false : options.ignoreApplyFailure,
         prepareUpdates,

@@ -4,11 +4,13 @@
       <div><span class="economic-label">Year (Series)</span><span data-economic="year_series">{{ economics.year_series }}</span></div>
       <div class="economic-issue-date">
         <label for="banknoteIssueDate" class="economic-label">Probable issue date</label>
-        <input id="banknoteIssueDate" name="issue_date" value="{{ val('issue_date') }}" placeholder="{{ economics.probable_issue_date }}" title="Actual release year or range, e.g. 1925 or 1925–1928. A printed series year may differ." autocomplete="off">
+        <input id="banknoteIssueDate" name="issue_date" value="{{ val('issue_date') }}" placeholder="{{ economics.probable_issue_date }}" title="Optional actual release year or range, e.g. 1925 or 1925–1928. Kept separately from the series-year buying-power comparison." autocomplete="off">
       </div>
-      <div><span class="economic-label">Buying power at issue · today's USD</span><span data-economic="at_issue_display">{{ economics.at_issue_display }}</span></div>
+      <div><span class="economic-label" data-economic-comparison-label>{% if economics.estimate_kind in ['historical_parity', 'historical_fx'] %}Series-year benchmark · today’s USD{% else %}Buying power in series year · today’s USD{% endif %}</span><span data-economic="at_issue_display">{{ economics.at_issue_display }}</span></div>
       <div><span class="economic-label">Buying power today · USD</span><span data-economic="today_display">{{ economics.today_display }}</span></div>
     </div>
+    <div class="economic-basis">Comparison year: <span data-economic="comparison_year">{{ economics.comparison_year|default('Unknown') }}</span>. <span data-economic="comparison_basis">{{ economics.comparison_basis|default('') }}</span></div>
+    <div class="economic-basis" data-economic="estimate_basis">{{ economics.estimate_basis|default('') }}</div>
     <div class="economic-data-date" data-economic="data_dates">{{ economics.data_dates|join(' · ') }}</div>
     <details class="economic-basis"><summary>Basis &amp; sources</summary>
       <div data-economic="issue_basis">{{ economics.issue_basis }}</div>
@@ -17,4 +19,4 @@
       <div data-economic-sources>{% for source in economics.sources %}<a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.name }}</a>{% endfor %}</div>
     </details>
   </div>
-  <script src="{{ url_for('static', filename='js/banknote-economics.js') }}?v={{ asset_v }}" defer></script>
+  <script src="{{ url_for('static', filename='js/banknote-economics.js') }}?v={{ asset_v('js/banknote-economics.js') }}" defer></script>

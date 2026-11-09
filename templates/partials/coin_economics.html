@@ -1,0 +1,30 @@
+  {% set economics = coin_economic_summary(r) %}
+  <div class="coin-economics" id="coinEconomics" data-fineness-identity="{{ economics.fineness_identity }}" data-fineness-state="{{ economics.fineness_state }}" {% if r and r['id'] %}data-url="{{ url_for('coin_economic_context', record_id=r['id']) }}" data-fineness-url="{{ url_for('coin_save_fineness', record_id=r['id']) }}"{% endif %}>
+    <div class="coin-economics-line">
+      <div><span class="economic-label">Historical buying-power comparison</span><span data-coin-economic="wage_days_display">{{ economics.wage_days_display }}</span></div>
+      <div><span class="economic-label" data-coin-economic="wage_label">{{ economics.wage_label }}</span><span data-coin-economic="wage_display">{{ economics.wage_display }}</span></div>
+      <div><span class="economic-label" data-coin-economic="metal_label">{{ economics.metal_label }}</span><span data-coin-economic="metal_display">{{ economics.metal_display }}</span></div>
+    </div>
+    <div class="economic-basis" data-coin-economic="wage_basis">{{ economics.wage_basis }}</div>
+    <div class="economic-basis" data-coin-economic="metal_basis">{{ economics.metal_basis }}</div>
+    <div class="economic-data-date"><span data-coin-economic="quote_status">{{ economics.quote_status }}</span> · <span data-coin-economic="data_dates">{{ economics.data_dates|join(' · ') }}</span></div>
+    <details class="economic-basis"><summary>Basis &amp; sources</summary>
+      <p data-coin-economic="wage_method">{{ economics.wage_method }}</p>
+      <p data-coin-economic="metal_method">{{ economics.metal_method }}</p>
+      <div data-coin-economic-sources>{% for source in economics.sources %}<a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">{{ source.name }}</a>{% endfor %}</div>
+    </details>
+    {% if current_user and current_user.role == 'owner' and r and r['id'] %}
+    <details class="economic-basis coin-fineness-editor"><summary>Fineness &amp; provenance</summary>
+      <div class="coin-fineness-fields">
+        <label>Fineness (%)<input type="number" min="0.001" max="100" step="any" data-fineness="percent" value="{{ economics.fineness_percent }}" placeholder="Unknown"></label>
+        <label>Basis<select data-fineness="basis"><option value="">Choose basis</option>{% for basis in ['catalogue standard','assay','estimate'] %}<option value="{{ basis }}" {% if economics.fineness_basis == basis %}selected{% endif %}>{{ basis|capitalize }}</option>{% endfor %}</select></label>
+        <label>Source URL<input type="url" data-fineness="source" value="{{ economics.fineness_source }}" placeholder="https://…"></label>
+      </div>
+      <button type="button" class="toolbar-btn" data-fineness-action="save">Save fineness</button>
+      <button type="button" class="toolbar-btn" data-fineness-action="research">Research blank fineness</button>
+      <p>Automatic research currently covers classical Athenian tetradrachms. Other types need a documented manual entry.</p>
+      <span role="status" data-fineness-status></span>
+    </details>
+    {% endif %}
+  </div>
+  <script src="{{ url_for('static', filename='js/coin-economics.js') }}?v={{ asset_v('js/coin-economics.js') }}" defer></script>

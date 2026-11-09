@@ -6,6 +6,16 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
+- **Banknote buying power** (2026-11-08): use Year (Series) for the approximate
+  face-value comparison and show that year and basis. Keep probable issue-date
+  metadata independent; changing it must not change the series-year comparison.
+  See `docs/banknote-economics.md`.
+- **Coin buying power and metal value** (2026-11-08): show sourced historical
+  wage comparisons separately from current gold/silver content value. Keep
+  unknown purity explicit as a pure-metal ceiling. When researching fineness,
+  save the selected value and its source/basis to the detail record, distinguish
+  type estimates from specimen assays, and preserve existing values until an
+  explicit correction. See `docs/coin-economics.md`.
 - **Questionable banknote details** (2026-11-04): identify the specific disputed
   data and provide an explicit manual correction path instead of only disabling
   the draft. Keep exact purchase evidence, original photos and existing collection

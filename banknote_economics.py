@@ -17,12 +17,19 @@ import unicodedata
 import urllib.request
 
 import banknote_catalog
+import banknote_face_value
+import banknote_historical_rates
 
 FED_URL = 'https://www.minneapolisfed.org/about-us/monetary-policy/inflation-calculator/consumer-price-index-1800-'
 BOE_URL = 'https://www.bankofengland.co.uk/monetary-policy/inflation/inflation-calculator'
 WB_URL = 'https://api.worldbank.org/v2/country/{countries}/indicator/FP.CPI.TOTL?format=json&per_page=20000'
 FX_URL = 'https://api.frankfurter.dev/v1/latest?base=USD'
 ECB_URL = 'https://www.ecb.europa.eu/euro/intro/html/index.en.html'
+HISTORICAL_US_CPI_URL = 'https://hsus.cambridge.org/HSUSWeb/toc/treeTablePathIdCc1-2.html'
+CONNECTICUT_CURRENCY_URL = 'https://research.colonialwilliamsburg.org/DigitalLibrary/view/index.cfm?doc=ResearchReports%5CRR0066.xml'
+# Historical Statistics table Cc1: 1776 CPI, on the 1982–1984 = 100 base.
+# This is a historical reconstruction, not a contemporary BLS measurement.
+CONNECTICUT_1776_CPI = 8.735
 
 # Country, present currency, earliest year in this monetary unit, unit spelling.
 # The lower limit protects reforms; it is not a claim of CPI coverage.
@@ -86,9 +93,16 @@ def _plain(value):
                    if not unicodedata.combining(c))
 
 
+def _expanded_ranges(value):
+    # A same-century abbreviated range is catalogue notation, not a new date.
+    # Reversed endings stay reversed and are rejected by comparison_dates.
+    return re.sub(r'(?<!\d)((?:1[7-9]|20)\d{2})\s*([-–—]|to)\s*(\d{2})(?!\d|[-/.]\d{1,2}\b)',
+                  lambda match: match[1] + '–' + match[1][:2] + match[3], str(value or ''), flags=re.I)
+
+
 def years(value):
     """Gregorian dates only; no conversion of AH/BE/ROC calendar labels."""
-    s = str(value or '')
+    s = _expanded_ranges(value)
     if re.search(r'\b(?:AH|BE|SH|ROC|Hijri|Buddhist)\b', s, re.I):
         return []
     found = sorted(set(int(y) for y in re.findall(r'(?<!\d)(1[7-9]\d{2}|20\d{2})(?!\d)', s)))
@@ -116,39 +130,100 @@ def dates(note):
                 years=yy, basis='Catalogue year used as an estimate; actual issue date is unverified')
 
 
+def comparison_dates(note):
+    """Use the displayed Year (Series), independently of actual issue metadata."""
+    primary = _expanded_ranges(note.get('date_1_text') or note.get('date_1')).strip()
+    series = _expanded_ranges(note.get('series')).strip()
+
+    def candidate(text):
+        # Do not truncate a numeric fractional year. A dotted full date such
+        # as 1776.05.10 remains a date, and integral 1776.0 is a whole year.
+        fractions = re.findall(r'(?<![\d.])(?:1[7-9]|20)\d{2}\.(\d+)(?![\d.])', text)
+        if any(any(digit != '0' for digit in fraction) for fraction in fractions):
+            return [], 'The comparison year must be a whole Gregorian year, date or explicit range.'
+        found = years(text)
+        if len(found) <= 1:
+            return found, ''
+        bounds = re.findall(r'(?<!\d)(1[7-9]\d{2}|20\d{2})\s*(?:[-–—]|to)\s*(1[7-9]\d{2}|20\d{2})(?!\d)', text, re.I)
+        if len(bounds) != 1 or int(bounds[0][0]) > int(bounds[0][1]) or found != list(range(int(bounds[0][0]), int(bounds[0][1]) + 1)):
+            return [], 'The comparison year contains unrelated or ambiguous years.'
+        return found, ''
+
+    selected, error = candidate(primary)
+    family, family_error = candidate(series)
+    explicit_series = bool(re.search(r'\bseries\s*(?:of\s*)?[:\-]?\s*(?:1[7-9]|20)\d{2}\b', series, re.I)
+                           or re.fullmatch(r'(?:1[7-9]|20)\d{2}', series)
+                           or re.search(r'\d{4}\s*(?:[-–—]|to)\s*\d{4}', series, re.I))
+    source = 'Catalogue year'
+    if not error and selected and explicit_series:
+        # A broader emission-family range may contain the precise printed year.
+        if family_error or (family and not set(selected).issubset(family)):
+            error = 'The Year (Series) field conflicts with the stated series year.'
+        elif family:
+            source = 'Series year'
+    if not selected and not error:
+        selected, error, source = family, family_error, 'Series year'
+    if error:
+        return dict(years=[], label='Unavailable', basis=error + ' Verify Year (Series) and Series; saved dates have not been changed.')
+    if not selected:
+        return dict(years=[], label='Unavailable', basis='A Gregorian series or catalogue year is needed for this comparison.')
+    if re.search(r'\b(?:act|law|decree|lei|loi)\b', primary if years(primary) else series, re.I):
+        source = 'Printed law year'
+    label = str(selected[0]) + ('–' + str(selected[-1]) if len(selected) > 1 else '')
+    return dict(years=selected, label=label,
+                basis=source + ' used for an approximate comparison; not a verified issue date.')
+
+
+def _connecticut_1776(note, year):
+    """A bounded local-money relation, never a sterling rule for all shillings."""
+    country = banknote_catalog.fold(banknote_catalog.canonical_country(note.get('country')))
+    issuer = banknote_catalog.fold(note.get('issuer') or '')
+    return (year == 1776
+            and country in {'connecticutcolony', 'colonyofconnecticut', 'provinceofconnecticut'}
+            and issuer in {'colonyofconnecticut', 'thecolonyofconnecticut', 'connecticutcolony'}
+            and bool(re.fullmatch(r'(?:\d+(?:\.\d+)?|\d+\s*/\s*\d+|[½¼¾])\s+shillings?', _plain(note.get('denomination'))))
+            and not re.search(r'sterling|continental|state of connecticut|old tenor|new tenor',
+                              _plain(note.get('series'))))
+
+
 def _amount(text):
-    for symbol, value in (('½','0.5'), ('¼','0.25'), ('¾','0.75')):
-        text = str(text or '').replace(symbol, value)
-    s = _plain(text).replace(',', '').strip()
-    if re.match(r'^[1-9]\d{0,2}\.\d{3}(?!\d)', s): return None
-    fraction = re.match(r'^(\d+)\s*/\s*(\d+)\b', s)
-    if fraction:
-        return int(fraction[1]) / int(fraction[2]) if int(fraction[2]) else None
-    m = re.match(r'^(?:us\$|hk\$|a\$|c\$|[$£€])?\s*(\d+(?:\.\d+)?|[½¼¾])\s*', s)
-    if not m:
-        return None
-    value = {'½': .5, '¼': .25, '¾': .75}.get(m[1])
-    value = float(m[1]) if value is None else value
-    tail = s[m.end():]
-    if re.search(r'\d', tail): return None
-    if re.match(r'thousand\b', tail): value *= 1_000
-    elif re.match(r'million\b', tail): value *= 1_000_000
-    elif re.match(r'billion\b', tail): value *= 1_000_000_000
-    return value if 0 < value < 1e16 else None
+    parsed = banknote_face_value.parse(text)
+    return parsed['amount'] if parsed else None
+
+
+def _symbol_matches(note, parsed):
+    if not parsed: return False
+    country = banknote_catalog.canonical_country(note.get('country'))
+    required = {'us$': 'United States of America', 'hk$': 'Hong Kong', 'a$': 'Australia', 'c$': 'Canada'}
+    return parsed['symbol'] not in required or country == required[parsed['symbol']]
 
 
 def currency(note, year):
     country = banknote_catalog.canonical_country(note.get('country'))
-    denom = _plain(note.get('denomination'))
+    parsed = banknote_face_value.parse(note.get('denomination'))
+    if parsed and not _symbol_matches(note, parsed): return None
+    denom = parsed['unit'] if parsed else _plain(note.get('denomination'))
     issuer = _plain(note.get('issuer'))
     kind = _plain(note.get('issue_type'))
+    national_japan = (country == 'Japan' and kind == 'national' and re.search(r'japanese government|bank of japan', issuer) and not re.search(r'occupation|military', issuer))
+    national_us = (country == 'United States of America' and
+                   re.search(r'united states treasury|federal reserve bank', issuer) and
+                   not re.search(r'military payment|coupon|savings bond', issuer + ' ' + _plain(note.get('series'))))
+    if national_us and re.fullmatch(r'silver dollars?', denom): denom = 'dollars'
+    if re.search(r'\b(?:cfa|cfp)\b', denom): return None
+    if country == 'France' and re.search(r'\b(?:old|ancien|anciens|ancienne|anciennes)\b', denom): return None
+    if country == 'Germany' and re.search(r'deutsche notenbank|staatsbank|\bddr\b|german democratic|ostmark', issuer + ' ' + denom): return None
     # Local vouchers, occupation currencies and competing dollar/rupee regimes
     # do not acquire the national currency's purchasing power merely by name.
-    if (re.search(r'notgeld|occupation|scrip|private|military', kind)
-            or re.search(r'confederate|japanese government|military|occupation|soviet|savings bond|coupon', issuer)):
+    if (re.search(r'notgeld|scrip|private|counterfeit', kind) or (not national_us and re.search(r'occupation|military', kind))
+            or (not national_japan and re.search(r'confederate|japanese government|military|occupation|soviet|savings bond|coupon', issuer))):
         return None
     if re.search(r'\b(?:cruzeiros?|reis|milreis|reichsmarks?|rentenmarks?|gold yuan|customs gold|gold units?|yuan gold|yuan silver|old pesos?|silver dollars?|piastres?)\b', denom):
         return None
+    if _connecticut_1776(note, year):
+        # Table XIII records six Connecticut shillings per Spanish milled
+        # dollar. This supports a historical face-value estimate only.
+        return 'USA', 'USD', 1 / 6
     # Units changed during these calendar years. The year alone cannot decide
     # which side of the reform an otherwise identical currency name denotes.
     if (country, year) in {('Brazil',1994),('China',1955),('Mexico',1993),('Poland',1995),
@@ -199,22 +274,43 @@ def money(value):
 def calculate(note, data, today=None):
     today = today or date.today()
     when = dates(note)
+    comparison = comparison_dates(note)
     result = dict(year_series=when['series'], probable_issue_date=when['issue'],
                   issue_basis=when['basis'], at_issue=None, today=None, at_issue_display='Unavailable',
-                  today_display='Unavailable', sources=[], data_dates=[], note='')
-    yy = when['years']
-    # A series date may still identify the monetary unit for today's nominal
-    # amount, but cannot authorize an at-issue inflation calculation.
-    unit_years = yy or years(note.get('date_1')) or years(note.get('series'))
+                  today_display='Unavailable', sources=[], data_dates=[], note='',
+                  comparison_year=comparison['label'], comparison_basis=comparison['basis'],
+                  estimate_kind='unavailable', estimate_basis='')
+    yy = comparison['years']
+    # A series/catalogue year is an explicit comparison basis, never a claim
+    # about release. Saved issue_date remains separate and does not replace it.
+    unit_years = yy
     amount = _amount(note.get('denomination'))
     if not unit_years or amount is None:
-        result['note'] = 'A Gregorian year and numeric face value are needed.'
+        result['note'] = comparison['basis'] if not unit_years else ('No monetary face denomination is recorded. Verify the Denomination field before a face-value comparison.' if not note.get('denomination') else 'The face amount or its unit is ambiguous. Verify the recorded Denomination; no value has been guessed.')
+        return result
+    parsed = banknote_face_value.parse(note.get('denomination'))
+    if not _symbol_matches(note, parsed):
+        result['note'] = 'The denomination’s currency prefix conflicts with the recorded country.'
         return result
     identities = [currency(note, y) for y in unit_years]
+    historical = None
+    parsed = banknote_face_value.parse(note.get('denomination'))
     if None in identities or len(set(identities)) != 1:
-        result['note'] = 'No verified conversion to a current currency for this monetary issue.'
-        return result
-    iso, code, factor = identities[0]
+        rules = [banknote_historical_rates.reference(note, y, parsed['unit']) for y in unit_years]
+        if any(rule is None for rule in rules):
+            result['note'] = banknote_historical_rates.unavailable_reason(note, unit_years, parsed['unit'])
+            return result
+        signatures = {(r['iso'], r['code'], r['family']) for r in rules}
+        if len(signatures) != 1:
+            result['note'] = 'The comparison range crosses a monetary-regime change; a more precise series year is needed.'
+            return result
+        historical = rules[0]
+        iso, code, factor = historical['iso'], historical['code'], historical['factor']
+    else:
+        iso, code, factor = identities[0]
+    colonial = all(_connecticut_1776(note, year) for year in unit_years)
+    result.update(estimate_kind=historical['kind'] if historical else 'historical_parity' if colonial else 'domestic_cpi',
+                  estimate_basis=historical['basis'] if historical else 'US purchasing-power benchmark at historical face-value parity.' if colonial else 'Domestic consumer-price comparison, expressed in today’s USD.')
     fx = data.get('fx', {})
     fx_date = fx.get('date', '')
     rate = 1. if code == 'USD' else fx.get('usd_per_unit', {}).get(code)
@@ -222,7 +318,17 @@ def calculate(note, data, today=None):
         result['note'] = 'A current USD exchange rate is unavailable.'
         return result
     nominal = amount * factor
-    result.update(today=nominal * rate, today_display=money(nominal * rate))
+    if historical:
+        result['note'] = 'Historical benchmark only; this monetary issue has no verified current nominal spending amount. Local inflation, exchange restrictions and paper-money discounts may differ.'
+        result['sources'].extend(historical['sources'])
+    elif colonial:
+        result['note'] = 'Obsolete Connecticut currency has no current nominal spending amount. The historical estimate uses face-value parity; wartime paper-money discounts are not measured.'
+        result['sources'].extend([
+            dict(name='Colonial Williamsburg: Connecticut currency, Table XIII', url=CONNECTICUT_CURRENCY_URL),
+            dict(name='Historical Statistics of the United States: 1776 CPI, table Cc1', url=HISTORICAL_US_CPI_URL),
+        ])
+    else:
+        result.update(today=nominal * rate, today_display=money(nominal * rate))
     if code != 'USD':
         result['sources'].append(dict(name='ECB exchange rates via Frankfurter', url=FX_URL))
         result['data_dates'].append('FX ' + fx_date)
@@ -231,13 +337,28 @@ def calculate(note, data, today=None):
     if banknote_catalog.canonical_country(note.get('country')) in EURO and not re.search(r'\beuros?\b', _plain(note.get('denomination'))):
         result['sources'].append(dict(name='ECB fixed euro conversion rates', url=ECB_URL))
     series = data.get('cpi', {}).get(iso, {})
-    values = series.get('values', {})
+    original_values = series.get('values', {})
+    values, extended = banknote_historical_rates.cpi_values(iso, series)
+    if not colonial and extended and any(str(y) not in original_values and str(y) in values for y in yy):
+        result['sources'].append(dict(name='Historical Statistics of the United States: CPI table Cc1' if iso == 'USA' else 'Jordà–Schularick–Taylor historical CPI (CC BY-NC-SA 4.0)', url=HISTORICAL_US_CPI_URL if iso == 'USA' else banknote_historical_rates.JST_URL))
+        result['data_dates'].append('HSUS reconstructed historical CPI; modern 1982–84 base' if iso == 'USA' else 'JST release 6 historical CPI; rebased at 2010')
     current = series.get('current', {})
     end = current.get('value')
     current_years = years(current.get('period'))
     recent = current_years and 0 <= today.year-max(current_years) <= 2
-    if yy and recent and all(str(y) in values and y <= today.year for y in yy) and isinstance(end, (int, float)) and end > 0:
-        converted = [nominal * end / values[str(y)] * rate for y in yy if values[str(y)] > 0]
+    if colonial:
+        # Rebase on the documented modern CPI base, not a splice at 1800:
+        # the two sources' eighteenth-century reconstructions differ.
+        anchors = [values.get(str(year)) for year in (1982, 1983, 1984)]
+        valid_base = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                         and math.isfinite(v) and v > 0 for v in anchors)
+        values = {'1776': CONNECTICUT_1776_CPI * (sum(anchors) / 3) / 100} if valid_base else {}
+    if (yy and recent and all(str(y) in values and y <= today.year for y in yy)
+            and isinstance(end, (int, float)) and not isinstance(end, bool)
+            and math.isfinite(end) and end > 0):
+        converted = [amount * (rules[i]['factor'] if historical else factor) * end / values[str(y)] * rate for i, y in enumerate(yy)
+                     if isinstance(values[str(y)], (int, float)) and not isinstance(values[str(y)], bool)
+                     and math.isfinite(values[str(y)]) and values[str(y)] > 0]
         if len(converted) == len(yy):
             lo, hi = min(converted), max(converted)
             result.update(at_issue=lo if lo == hi else [lo, hi],
@@ -248,12 +369,52 @@ def calculate(note, data, today=None):
                 result['data_dates'].append('historical CPI estimate')
             if current.get('estimated'):
                 result['data_dates'].append('current CPI estimate')
+    if result['at_issue'] is None and not historical and not colonial:
+        rules = [banknote_historical_rates.reference(note, y, parsed['unit']) for y in yy]
+        if rules and all(r is not None for r in rules):
+            proxy = _reference_estimate(rules, amount, yy, data, today)
+            if proxy:
+                proxy['sources'] = result['sources'] + proxy['sources']
+                proxy['data_dates'] = result['data_dates'] + proxy['data_dates']
+                result.update(proxy)
+                result['note'] = ' '.join(filter(None, [result['note'], 'Historical reference benchmark; local prices and exchange restrictions may differ.']))
     if result['at_issue'] is None:
-        missing = 'Actual issue date is unverified.' if not yy else 'No comparable CPI data for the estimated issue year.'
+        missing = 'No comparable ' + iso + ' CPI data for ' + comparison['label'] + '; a sourced price series or historical exchange benchmark is needed.'
         result['note'] = ' '.join(filter(None, [result['note'], missing]))
     # Preserve small nonzero equivalents rather than misreporting them as zero.
-    result['method'] = 'At issue: face value × domestic CPI change × USD exchange rate. Today: the same nominal amount × USD exchange rate. Fixed euro conversions are applied where needed. These compare face-value spending power, not collector value or redemption eligibility.'
+    result['method'] = ('Official annual FX benchmark: face value ÷ the selected year’s published local-currency units per USD × US CPI change to the current source period. This estimates US-dollar purchasing power, not the local basket or unofficial exchange value.' if historical and historical['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented parity × reference-country CPI change × current USD exchange rate. ' + historical['basis'] if historical else result.get('method') or ('Historical face-value estimate: 6 shillings in Connecticut money = 1 Spanish milled dollar; apply US CPI change from 1776 with both indices on the 1982–1984 base. This is an approximate dollar purchasing-power comparison, not a measured Connecticut price basket, paper-money trading value, collector value or redemption amount.'
+                        if colonial else
+                        'Series-year comparison: face value × domestic CPI change × USD exchange rate. Today: the same nominal amount × USD exchange rate. Fixed euro conversions are applied where needed. These compare face-value spending power, not collector value or redemption eligibility; the comparison year is not a verified issue date.'))
+    if historical and historical['kind'] == 'historical_fx':
+        result['data_dates'].append('Official annual FX ' + comparison['label'])
+    result['sources'] = list({source['url']: source for source in result['sources']}.values())
+    result['data_dates'] = list(dict.fromkeys(result['data_dates']))
     return result
+
+
+def _reference_estimate(rules, amount, yy, data, today):
+    signature = {(r['iso'], r['code'], r['family']) for r in rules}
+    if len(signature) != 1: return None
+    rule = rules[0]
+    series = data.get('cpi', {}).get(rule['iso'], {})
+    current = series.get('current', {})
+    periods = years(current.get('period'))
+    if not periods or not 0 <= today.year - max(periods) <= 2: return None
+    values, extended = banknote_historical_rates.cpi_values(rule['iso'], series)
+    rate = 1 if rule['code'] == 'USD' else data.get('fx', {}).get('usd_per_unit', {}).get(rule['code'])
+    end = current.get('value')
+    numbers = [rate, end] + [values.get(str(y)) for y in yy]
+    if not all(isinstance(v, (float, int)) and not isinstance(v, bool) and math.isfinite(v) and v > 0 for v in numbers): return None
+    converted = [amount * r['factor'] * rate * end / values[str(y)] for r, y in zip(rules, yy)]
+    lo, hi = min(converted), max(converted)
+    sources = list(rule['sources']) + [dict(name=series.get('name', 'Consumer price index'), url=series['source_url'])]
+    if extended and any(str(y) not in series.get('values', {}) for y in yy):
+        sources.append(dict(name='Historical Statistics of the United States: CPI table Cc1' if rule['iso'] == 'USA' else 'Jordà–Schularick–Taylor historical CPI', url=HISTORICAL_US_CPI_URL if rule['iso'] == 'USA' else banknote_historical_rates.JST_URL))
+    if rule['code'] != 'USD': sources.append(dict(name='ECB exchange rates via Frankfurter', url=FX_URL))
+    return dict(at_issue=lo if lo == hi else [lo, hi], at_issue_display='≈ ' + (money(lo) if lo == hi else money(lo) + '–' + money(hi)),
+                estimate_kind=rule['kind'], estimate_basis=rule['basis'], sources=sources,
+                data_dates=['Reference CPI ' + str(current.get('period'))] + (['Official annual FX ' + str(min(yy)) + ('–' + str(max(yy)) if len(yy)>1 else '')] if rule['kind'] == 'historical_fx' else ['FX ' + str(data.get('fx', {}).get('date', ''))] if rule['code'] != 'USD' else []),
+                method=('Official annual FX benchmark: face value ÷ selected-year local-currency units per USD × US CPI change. ' if rule['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented monetary parity × reference-country CPI change × current USD exchange rate. ') + rule['basis'])
 
 
 def parse_fed(document):

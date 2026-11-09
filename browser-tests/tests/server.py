@@ -19,7 +19,7 @@ sys.path.insert(0, str(root))
 temporary = tempfile.TemporaryDirectory(prefix='stuffapp-e2e-')
 atexit.register(temporary.cleanup)
 os.environ.update(DATA_DIR=temporary.name, EBAY_SYNC_WORKER='0', ORIGINAL_LISTING_WORKER='0',
-    BANKNOTE_ECONOMICS_REFRESH='0',
+    BANKNOTE_ECONOMICS_REFRESH='0', COIN_ECONOMICS_REFRESH='0',
     BANKNOTE_IMPORT_WORKER='0', STUFFAPP_OWNER_EMAIL='fixture-owner@example.invalid',
     STUFFAPP_DEV_USER='fixture-owner@example.invalid', STUFFAPP_OWNER_DISPLAY_NAME='Synthetic Owner',
     STUFFAPP_TODAY_TOKEN='synthetic-fixture-token-not-an-account-key-0000')
@@ -132,15 +132,43 @@ def fixture_timor():
 def fixture_economics():
     db=stuff.get_db()
     if request.method=='POST':
-        for ident,country,denom,year,series,issue in (
-                ('fixture-economics-gbp','England','10 Shillings',1935,'',''),
-                ('fixture-economics-usd','United States of America','5 Dollars',1896,'Series of 1896','1897'),
-                ('fixture-economics-brl','Brazil','10 Mil Reis',1925,'Estampa 17A','')):
+        for ident,country,denom,year,series,issue,issuer in (
+                ('fixture-economics-gbp','England','10 Shillings',1935,'','',''),
+                ('fixture-economics-usd','United States of America','5 Dollars',1896,'Series of 1896','1897',''),
+                ('fixture-economics-brl','Brazil','10 Mil Reis',1925,'Estampa 17A','',''),
+                ('fixture-economics-connecticut','Connecticut Colony','1 Shilling',1776,'','','Colony of Connecticut'),
+                ('fixture-economics-usd-1917','United States of America','2 Dollars',1917,'Series of 1917','','United States Treasury'),
+                ('fixture-economics-hkd','Hong Kong','1 Dollar',1940,'','','Government of Hong Kong')):
             db.execute('''INSERT OR REPLACE INTO banknotes
-                (id,country,denomination,date_1,series,issue_date,status) VALUES(?,?,?,?,?,?,?)''',
-                (ident,country,denom,year,series,issue,'Own'))
+                (id,country,denomination,date_1,series,issue_date,issuer,status,price,notes)
+                VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                (ident,country,denom,year,series,issue,issuer,'Own','$12.34','Synthetic collector notes'))
         db.commit()
     return jsonify(rows=[dict(r) for r in db.execute("SELECT * FROM banknotes WHERE id LIKE 'fixture-economics-%' ORDER BY id")])
+
+
+@stuff.app.route('/__fixture/coin-economics', methods=['GET', 'POST'])
+def fixture_coin_economics():
+    db = stuff.get_db()
+    if request.method == 'POST':
+        for ident, metal in (('fixture-coin-silver', 'AR Silver'), ('fixture-coin-gold', 'AV Gold')):
+            db.execute('''INSERT OR REPLACE INTO coins
+                (id,region,mint,authority,denomination,date_1,date_1_text,date_2,date_2_text,metal,weight,status,price,notes)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (ident,'Attica','Athens','Athens','Tetradrachm',-454,'454 BC',-404,'404 BC',metal,17.15,'Own',123.45,'Synthetic collector notes'))
+        db.commit()
+        Path(stuff.DATA_DIR, 'precious-metals.json').write_text(json.dumps(dict(version=1, quotes={
+            'XAU':dict(price=4000,updated_at='2026-11-01T12:00:00Z'),
+            'XAG':dict(price=50,updated_at='2026-11-01T12:00:00Z')})))
+    return jsonify(rows=[dict(row) for row in db.execute("SELECT * FROM coins WHERE id LIKE 'fixture-coin-%' ORDER BY id")])
+
+
+original_coin_spec_lookup = stuff.fetch_coin_specs
+def fixture_coin_spec_lookup(coin, provider='anthropic'):
+    if str(coin['id']).startswith('fixture-coin-'):
+        return dict(sources='Synthetic fixture: no provider calls')
+    return original_coin_spec_lookup(coin, provider=provider)
+stuff.fetch_coin_specs = fixture_coin_spec_lookup
 
 
 @stuff.app.post('/__fixture/import-photos')
