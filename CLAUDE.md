@@ -6,8 +6,9 @@
 session's opening context. Keep it the first section of this file, and
 fold new standing instructions in here — nowhere else.)
 
-- **Banknote buying power** (2026-11-08): use Year (Series) for the approximate
-  face-value comparison and show that year and basis. Keep probable issue-date
+- **Banknote buying power** (2026-11-09): show only the approximate USD amount
+  immediately after Denomination; remove the separate economics display fields.
+  Use Year (Series) for the comparison, with its year and basis in the amount's tooltip. Keep probable issue-date
   metadata independent; changing it must not change the series-year comparison.
   See `docs/banknote-economics.md`.
 - **Coin buying power and metal value** (2026-11-08): show sourced historical
@@ -121,8 +122,8 @@ fold new standing instructions in here — nowhere else.)
 
 ## What this is
 
-Banknote detail pages have a derived face-value purchasing-power row above
-Description. Keep the actual `issue_date` separate from series/design dates and
+Banknote detail pages show one derived face-value purchasing-power amount after
+Denomination. Keep the actual `issue_date` separate from series/design dates and
 collector/purchase prices. Public CPI/FX inputs, monetary boundaries, source
 dates and unavailable cases are documented in `docs/banknote-economics.md`.
 

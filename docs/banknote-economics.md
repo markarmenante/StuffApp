@@ -1,8 +1,13 @@
 # Banknote face-value comparisons
 
-Every banknote detail, including existing collection notes, displays one row
-immediately above Description: Year (Series), Probable issue date, buying power
-in the series year expressed in today's USD, and buying power of the same nominal amount today.
+Every banknote detail, including existing collection notes, displays only the
+approximate series-year buying power in today's USD immediately after Denomination
+(for example, `≈ $9.45`). Mark's November 9 preference removes the separate
+economics panel, labels, dates, nominal-today amount and source display fields.
+The amount's tooltip retains the comparison year and basis; unsupported amounts
+show `Unavailable`, with the reason in the tooltip. The API retains the complete
+calculation and source metadata. The independently stored `issue_date` remains a
+hidden form value so ordinary full-form saves preserve it.
 The amounts are derived from the note and shared public datasets; they are never
 written into the purchase price, collector valuation or original description.
 
@@ -11,15 +16,14 @@ approximate comparison, even when the actual release date is unverified. The
 Year (Series) field supplies the comparison year; an explicit Gregorian year in
 Series is a fallback when that field is blank. A broad series range containing
 the recorded year is compatible, but contradictory years require review. The
-selected comparison year and its basis remain visible below the amounts.
+selected comparison year and its basis remain in the amount's tooltip.
 
-Domestic CPI calculations keep the label **Buying power in series year · today’s
-USD**. Historical monetary-parity and exchange-rate routes use **Series-year
-benchmark · today’s USD**, with the reference country's CPI basis visible.
+Domestic CPI calculations and historical monetary-parity or exchange-rate routes
+share the compact amount display, with the specific basis in its tooltip.
 For example, a Hong Kong 1940 dollar uses its documented sterling parity and
 a UK price benchmark; it does not claim a measured Hong Kong consumer basket.
 
-`issue_date` is an independently editable Gregorian year or range. Check can fill
+`issue_date` is independent Gregorian-year or range metadata. Check can fill
 it only from an explicit release/issue/circulation statement for the complete
 catalogue reference, with the normal server-stored evidence proposal. Printed
 series and law dates are not actual issue dates. Editing this metadata does not
@@ -32,10 +36,10 @@ multiplied by the domestic CPI ratio (latest / series year), then by the current
 USD exchange rate. The today calculation uses the same nominal amount and FX,
 without the inflation multiplier. This expresses the cost of the domestic
 basket in USD; it is not an international PPP estimate. The latest CPI and FX
-periods are visible below the row. Long-run historical indices and forecast
+periods remain available in the API. Long-run historical indices and forecast
 indices are marked as estimates. CPI more than two years old cannot supply a
 current comparison. This does not imply a cancelled note remains spendable or
-redeemable; see the expandable Basis & sources explanation.
+redeemable; the API retains the method and sources.
 
 Connecticut's 1776 lawful-money issues have a bounded historical exception:
 six shillings per Spanish milled dollar supplies the face-value dollar equivalent,
@@ -88,9 +92,8 @@ public data changes. The legacy API fields `at_issue` and `at_issue_display`
 carry the series-year result for compatibility; `comparison_year` and
 `comparison_basis` explain its meaning. `estimate_kind` distinguishes `domestic_cpi`,
 `historical_parity`, `historical_fx`, `historical_quote`, `historical_price` and
-`historical_range`; `estimate_basis` remains visible outside the expandable
-sources. All historical methods display **Series-year benchmark · today’s USD**.
-The domestic CPI method keeps its buying-power label.
+`historical_range`; `estimate_basis` remains in the amount's tooltip and the API.
+No separate comparison label or sources panel is displayed.
 
 Historical quotations retain the source's actual observation period and transaction
 scope. Federal Reserve Table 173 supplies the national Chinese legal-tender yuan

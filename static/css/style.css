@@ -4458,19 +4458,13 @@ input[type="date"] { -webkit-appearance: none; }
 .banknote-order-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .banknote-order-actions .toolbar-btn { height: 34px; }
 .banknote-order-actions button:disabled { opacity: .6; cursor: wait; }
-/* A face-value comparison is deliberately separate from the dealer description. */
-.banknote-economics { border-top: 1px solid #c7c7c7; border-bottom: 1px solid #c7c7c7; background: #f5f5f2; padding: 10px 12px 6px; }
-.banknote-economics-line { display: grid; grid-template-columns: 1.1fr 1fr 1.4fr 1.2fr; gap: 18px; align-items: start; }
-.banknote-economics-line > div { min-width: 0; font-size: 16px; line-height: 1.35; }
-.banknote-economics .economic-label { display: block; color: #6b6b66; font-size: 11px; letter-spacing: .02em; margin-bottom: 3px; }
-.banknote-economics input { width: 100%; min-width: 0; box-sizing: border-box; background: transparent; border: 0; border-bottom: 1px dotted #b9b9b1; border-radius: 0; padding: 0 0 2px; color: inherit; font: inherit; }
-.banknote-economics input::placeholder { color: #686862; opacity: 1; }
+/* Only the approximate series-year amount follows the denomination. */
+.banknote-economics { min-width: 0; font-size: 14px; line-height: 1.35; color: #111111; overflow-wrap: anywhere; }
+.banknote-economics > [data-economic] { display: block; }
 .economic-basis { font-size: 11px; line-height: 1.45; color: #6b6b66; margin-top: 5px; }
 .economic-basis summary { cursor: pointer; width: fit-content; }
 .economic-basis p { margin: 4px 0; }
 .economic-basis a { display: inline-block; margin-right: 14px; }
-.economic-data-date { font-size: 10px; color: #85857d; text-align: right; margin-top: 3px; }
-@media (max-width: 760px) { .banknote-economics-line { grid-template-columns: 1fr 1fr; gap: 10px 16px; } }
 .coin-economics { border-top: 1px solid #c7c7c7; border-bottom: 1px solid #c7c7c7; background: #f5f5f2; padding: 10px 12px; }
 .coin-economics-line { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
 .coin-economics-line > div { min-width: 0; font-size: 16px; line-height: 1.35; }

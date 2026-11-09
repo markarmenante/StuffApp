@@ -218,11 +218,16 @@ class RouteTests(unittest.TestCase):
 
     def tearDown(self):self.context.pop()
 
-    def test_each_banknote_has_line_directly_before_description_and_endpoint_never_edits(self):
+    def test_each_banknote_has_only_amount_after_denomination_and_endpoint_never_edits(self):
         response=self.client.get('/banknotes/economic')
         self.assertEqual(response.status_code,200)
         page=response.get_data(as_text=True)
-        self.assertLess(page.index('id="banknoteEconomics"'),page.index('<div class="section-bar">Description</div>'))
+        self.assertLess(page.index('name="denomination"'), page.index('id="banknoteEconomics"'))
+        self.assertLess(page.index('id="banknoteEconomics"'), page.index('name="material"'))
+        self.assertEqual(page.count('data-economic="'), 1)
+        self.assertNotIn('class="banknote-economics-line"', page)
+        self.assertNotIn('data-economic-sources', page)
+        self.assertIn('type="hidden" name="issue_date"', page)
         self.assertEqual(page.count('name="issue_date"'),1)
         before=dict(self.db.execute("SELECT * FROM banknotes WHERE id='economic'").fetchone())
         data=self.client.get('/banknotes/economic/economics').get_json()
@@ -243,14 +248,16 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(after['at_issue'], before['at_issue'])
         self.assertEqual(after['probable_issue_date'], '1936–1938')
 
-    def test_historical_price_and_range_labels_render_without_javascript(self):
+    def test_historical_price_and_range_amounts_render_without_javascript(self):
         base = self.client.get('/banknotes/economic/economics').get_json()
         for kind in ('historical_price', 'historical_range', 'historical_quote'):
             with self.subTest(kind=kind):
-                summary = dict(base, estimate_kind=kind, estimate_basis='Sourced historical benchmark')
+                summary = dict(base, estimate_kind=kind, estimate_basis='Sourced historical benchmark',
+                               at_issue_display='≈ $3.00–$5.00')
                 with patch.dict(stuff.app.jinja_env.globals, banknote_economic_summary=lambda row: summary):
                     page = self.client.get('/banknotes/economic').get_data(as_text=True)
-                self.assertIn('Series-year benchmark', page)
+                self.assertIn('>≈ $3.00–$5.00</span>', page)
+                self.assertIn('title="Series year: 1935.', page)
                 self.assertIn('Sourced historical benchmark', page)
 
 

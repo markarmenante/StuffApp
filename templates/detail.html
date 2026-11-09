@@ -1595,13 +1595,14 @@ document.addEventListener('DOMContentLoaded', function () {
   </script>
   {% endif %}
 
-  <!-- Denomination / Material / Date / Age -->
-  <div class="dgrid" style="grid-template-columns: repeat(4, 1fr);">
+  <!-- Denomination / Buying power / Material / Date / Age -->
+  <div class="dgrid" style="grid-template-columns: repeat(5, 1fr);">
     <div class="dcell">
       <input type="text" name="denomination" value="{{ val('denomination') }}"
              {% if is_new and not val('denomination') %}placeholder="Denomination"{% endif %}>
       <span class="clabel">Denomination</span>
     </div>
+    {% include 'partials/banknote_economics.html' %}
     <div class="dcell">
       <select name="material"><option value=""></option>{% for o in vlists.banknote_material %}<option value="{{ o }}" {{ 'selected' if val('material')==o }}>{{ o }}</option>{% endfor %}</select>
       <span class="clabel">Material</span>
@@ -1731,7 +1732,6 @@ document.addEventListener('DOMContentLoaded', function () {
     {{ tacell('grade_modifier','EPQ / PPQ / ★', ['EPQ','PPQ','EPQ ★','★','+']) }}
     {{ cell('grade_condition','Condition') }}
   </div>
-  {% include 'partials/banknote_economics.html' %}
   <!-- Description -->
   <div class="section-bar">Description</div>
   {% set _desc = val('description') %}
