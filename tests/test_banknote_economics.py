@@ -243,5 +243,15 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(after['at_issue'], before['at_issue'])
         self.assertEqual(after['probable_issue_date'], '1936–1938')
 
+    def test_historical_price_and_range_labels_render_without_javascript(self):
+        base = self.client.get('/banknotes/economic/economics').get_json()
+        for kind in ('historical_price', 'historical_range', 'historical_quote'):
+            with self.subTest(kind=kind):
+                summary = dict(base, estimate_kind=kind, estimate_basis='Sourced historical benchmark')
+                with patch.dict(stuff.app.jinja_env.globals, banknote_economic_summary=lambda row: summary):
+                    page = self.client.get('/banknotes/economic').get_data(as_text=True)
+                self.assertIn('Series-year benchmark', page)
+                self.assertIn('Sourced historical benchmark', page)
+
 
 if __name__=='__main__':unittest.main()

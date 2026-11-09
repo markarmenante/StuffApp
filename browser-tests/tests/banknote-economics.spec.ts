@@ -1,5 +1,28 @@
 import { test, expect } from '@playwright/test';
 
+test('historical price and range refreshes retain benchmark labels and visible basis', async ({ page, request }) => {
+  await page.setViewportSize({width:390, height:1000});
+  const before = (await (await request.post('/__fixture/economics')).json()).rows;
+  const original = await (await request.get('/banknotes/fixture-economics-gbp/economics')).json();
+  let comparison = {estimate_kind:'historical_price', estimate_basis:'Synthetic historical local-price benchmark.', at_issue_display:'≈ $4.00'};
+  await page.route('**/banknotes/fixture-economics-gbp/economics', route => route.fulfill({json:{...original, ...comparison}}));
+  await page.goto('/banknotes/fixture-economics-gbp');
+  const panel = page.locator('#banknoteEconomics');
+  for (const next of [comparison,
+    {estimate_kind:'historical_range', estimate_basis:'Synthetic regional exchange-rate range.', at_issue_display:'≈ $3.00–$5.00'},
+    {estimate_kind:'domestic_cpi', estimate_basis:'Domestic consumer-price comparison, expressed in today’s USD.', at_issue_display:'≈ $6.00'}]) {
+    comparison = next;
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('record-field-saved', {detail:{field:'issue_type'}})));
+    await expect(panel.locator('[data-economic="estimate_basis"]')).toHaveText(next.estimate_basis);
+    await expect(panel.locator('[data-economic="at_issue_display"]')).toHaveText(next.at_issue_display);
+    await expect(panel.locator('[data-economic-comparison-label]')).toHaveText(next.estimate_kind === 'domestic_cpi'
+      ? 'Buying power in series year · today’s USD' : 'Series-year benchmark · today’s USD');
+    const box = await panel.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+  }
+  expect((await (await request.get('/__fixture/economics')).json()).rows).toEqual(before);
+});
+
 for (const width of [1440, 390]) {
   test(`series-year buying power preserves issue-date metadata at ${width}px`, async ({ page, request }, testInfo) => {
     await page.setViewportSize({width, height: 1000});

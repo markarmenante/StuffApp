@@ -1,6 +1,7 @@
 """Reviewed historical face-value relationships, never inferred from filing groups.
 
-A rule identifies the issuer, monetary unit and complete calendar-year bounds.
+A rule identifies the issuer, monetary unit and the documented observation period.
+Partial years, restricted transaction rates and benchmark ranges remain explicit.
 Its reference-country CPI gives a labelled benchmark, not a measured local price
 basket, market discount, collector value or promise of redemption.
 """
@@ -16,6 +17,8 @@ BOARD_URL = 'https://sites.krieger.jhu.edu/iae/files/2017/04/Krus-Schuler_Curren
 CFA_URL = 'https://www.tresor.economie.gouv.fr/tresor-international/la-zone-franc/la-zone-franc-de-1939-a-aujourd-hui'
 FRENCH_COLONIAL_URL = 'https://www.bceao.int/sites/default/files/2017-12/rapport_annuel_de_la_bceao_2003.pdf'
 CFP_URL = 'https://www.ieom.fr/IMG/pdf/ieom-rapport_d_activite_2019-page.pdf'
+GREEK_HISTORY_URL = 'https://www.bankofgreece.gr/BogDocumentEn/III.%20GREECE.pdf'
+FED_EXCHANGE_URL = 'https://fraser.stlouisfed.org/title/banking-monetary-statistics-1914-1941-38/part-i-6408/fulltext'
 
 
 def plain(value):
@@ -52,6 +55,19 @@ def reference(note, year, unit):
     """A reference unit for this exact issuer/date/leading denomination, or None."""
     country, issuer = plain(note.get('country')), plain(note.get('issuer'))
     evidence = ' '.join(plain(note.get(k)) for k in ('issuer', 'series', 'issue_type'))
+    if (country in ('confederate states', 'confederate states of america')
+            and re.fullmatch(r'(?:the )?confederate states of america', issuer)
+            and year == 1864 and re.fullmatch(r'dollars?', unit)
+            and not _matches(r'counterfeit|reproduction|replica|facsimile|old.?issue|old.?currency', evidence)):
+        rule = _rule('North Carolina Confederate-note legal gold-value range', 'GBR', 'GBP', 1/(49*4.8665),
+                     'https://www.govinfo.gov/content/pkg/USREPORTS-86/pdf/USREPORTS-86-548.pdf',
+                     'Regional legal-value benchmark for the 1864 new issue: the North Carolina retrospective scale values one gold dollar at 18–49 Confederate dollars from April–December. The range is translated to a UK price basket, not national Confederate purchasing power or redemption value.',
+                     ('https://fraser.stlouisfed.org/files/docs/publications/FRB/pages/1920-1924/1622_1920-1924.pdf',
+                      'https://fraser.stlouisfed.org/title/report-congress-commission-role-gold-domestic-international-monetary-systems-339/volume-i-6346/fulltext',
+                      'https://calculators.law/caselaw/decisions/oeW8n7npk3dM/haughton-v-merony'))
+        rule.update(kind='historical_range', factor_high=1/(18*4.8665), source_period='North Carolina legal gold-value scale, April–December 1864 new issue',
+                    method='Regional legal-value range: face Confederate dollars ÷ 18–49 Confederate dollars per gold US dollar ÷ 4.8665 gold US dollars per pound sterling × UK CPI change from 1864 × current GBP/USD. Gold dollars are not treated as Civil War paper US dollars. ' + rule['basis'])
+        return rule
     # Same-name wartime/private alternatives never inherit government parities.
     if _matches(r'japanese|guerrilla|counterfeit|notgeld|savings bond|coupon|confederate|reichsmark', evidence):
         return None
@@ -59,6 +75,165 @@ def reference(note, year, unit):
         if factor is None: return None
         return _rule(family, 'GBR', 'GBP', factor, url,
                      'UK purchasing-power benchmark at documented monetary parity. ' + detail)
+    if country == 'egypt' and 1915 <= year <= 1946 and _matches(r'national bank of egypt|egyptian government|ministry of finance', issuer):
+        factor = 40/39 if re.fullmatch(r'(?:egyptian )?pounds?', unit) else (40/39)/100 if re.fullmatch(r'piastres?', unit) else (40/39)/1000 if re.fullmatch(r'milliemes?', unit) else None
+        return gb('Egyptian sterling exchange parity', factor,
+                  'https://documents1.worldbank.org/curated/en/466121468038084316/pdf/669620SR0Box260E550economy0of0Egypt.pdf',
+                  '97.5 Egyptian piastres = one pound sterling before July 1947; 100 piastres = one Egyptian pound.')
+    if country == 'faroe islands' and 1949 <= year <= 2100 and _matches(r'faroese government|foroya landsstyri|danmarks nationalbank', issuer) and re.fullmatch(r'krona|kronur|kroner|krone', unit):
+        return _rule('Faroese/Danish krone parity', 'DNK', 'DKK', 1,
+                     'https://www.nationalbanken.dk/en/what-we-do/notes-and-coins/faroese-banknote-series',
+                     'Danish purchasing-power benchmark at one Faroese króna per Danish krone; this does not measure Faroese local prices.')
+    if country == 'greenland' and year in (1905, 1913) and _matches(r'handelsstederne i gr[øo]nland|styrelsen af kolonierne i gr[øo]nland|kongelige gr[øo]nlandske handel', issuer) and unit in ('ore', 'øre'):
+        return _rule('Greenland trading-post Danish currency claim', 'DNK', 'DKK', .01,
+                     'https://www.danskmoent.dk/pdf2/JCHolm%20GD.pdf',
+                     'Danish face-unit claim benchmark: 100 øre = one Danish krone. These notes were usable and redeemable only at Greenland trading posts, not freely exchangeable in Denmark; local prices are not measured.')
+    if country == 'hong kong' and year == 1935 and _matches(r'hong.?kong.*shanghai.*bank|hsbc|government of hong kong|chartered bank|mercantile bank', issuer):
+        factor = _unit(unit, dollar_factor=.0979166666666667)
+        if factor is not None:
+            rule = gb('Hong Kong silver-dollar annual exchange', factor,
+                      'https://www.aof.org.hk/research/HKIMR/publications-and-research/hong-kong-economic-history-database/silver-dollar-exchange-rate',
+                      'The 1935 historical annual average is 0.0979166666666667 GBP per silver dollar; the late-1935 peg is not used for the whole year.')
+            rule.update(kind='historical_quote', source_period='HKIMR silver-dollar annual exchange average, 1935',
+                        basis='UK purchasing-power benchmark using the observed 1935 annual silver-dollar exchange average; not the late-year fixed parity or measured Hong Kong local prices.',
+                        method='Historical annual-rate benchmark: face Hong Kong silver dollars × 0.0979166666666667 GBP per dollar × UK CPI change from 1935 × current GBP/USD. This is a UK price-basket benchmark across the 1935 monetary transition.')
+            rule['sources'].append(dict(name='HKMA historical silver-dollar API', url='https://api.hkma.gov.hk/public/hkimr/silver-dollar-ex-rate?pagesize=1000'))
+            return rule
+    if country == 'hong kong' and year == 1941 and _matches(r'hong.?kong.*shanghai.*bank|hsbc|chartered bank', issuer) and not _matches(r'duress|occupation|military|counterfeit|reproduction', evidence):
+        factor = _unit(unit, dollar_factor=.245923)
+        if factor is not None:
+            rule = _rule('Hong Kong 1941 quoted dollar exchange', 'USA', 'USD', factor, FED_EXCHANGE_URL,
+                         'US purchasing-power benchmark at the Federal Reserve mean quotation through December 24, 1941; excludes the occupation period and does not establish when this note circulated.')
+            rule.update(kind='historical_quote', source_period='Quoted HKD/USD: January–December 24, 1941; excludes occupation period',
+                        method='Historical quoted-rate benchmark: face Hong Kong dollars × 0.245923 USD/HKD (1941 mean through December 24 only) × US CPI change from 1941. ' + rule['basis'])
+            return rule
+    if country == 'new hebrides' and year == 1980 and _matches(r'institut d.emission d.outre.mer', issuer) and re.fullmatch(r'francs?', unit):
+        rule = _rule('New Hebrides franc before the vatu renaming', 'USA', 'USD', 1/68.2921212121666,
+                     'https://api.worldbank.org/v2/country/VUT/indicator/PA.NUS.FCRF?format=json&per_page=1000',
+                     'US purchasing-power benchmark using the 1980 annual exchange rate, 68.2921212121666 New Hebrides francs per dollar. The unit was renamed vatu in January 1981 without changing its value; this is not CFP parity.',
+                     ('https://www.rbv.gov.vu/index.php/en/about/our-history',
+                      'https://documents1.worldbank.org/curated/en/512911468317364875/pdf/multi-page.pdf'))
+        rule['kind'] = 'historical_fx'
+        return rule
+    if country == 'israel' and 'bank of israel' in issuer and 1968 <= year <= 1970 and re.fullmatch(r'lira|lirot|(?:israeli )?pounds?', unit):
+        return _rule('Israeli pound official dollar parity', 'USA', 'USD', 1/3.5,
+                     'https://boi.org.il/en/economic-roles/financial-markets/changes-in-exchange-rates-until-october-1977/',
+                     'US purchasing-power benchmark at 3.50 old Israeli pounds per dollar, the official rate from November 1967 until August 1971; not modern shekels.')
+    if country == 'laos' and 'banque nationale du laos' in issuer and year == 1957 and re.fullmatch(r'kips?', unit):
+        return _rule('Laotian royal kip official dollar rate', 'USA', 'USD', 1/35,
+                     'https://digitallibrary.un.org/record/3939785/files/Survey1957.pdf',
+                     'US purchasing-power benchmark at the restricted official rate of 35 royal kips per dollar. The contemporary free-market rate was 80–85 kips; this is not local purchasing power or a generally accessible exchange value.')
+    if ((country == 'burundi' and year == 1964 and 'banque du royaume du burundi' in issuer)
+            or (country in ('rwanda-burundi', 'rwanda burundi') and year == 1960 and _matches(r'banque d.emission du rwanda et du burundi', issuer))) and re.fullmatch(r'francs?', unit):
+        return _rule('Rwanda-Burundi and early Burundi franc official parity', 'USA', 'USD', 1/50,
+                     'https://aercafrica.org/old-website/wp-content/uploads/2018/07/RP123.pdf',
+                     'US purchasing-power benchmark at the original official 50 francs per dollar; excludes the January 1965 devaluation and later currency regimes.')
+    if ((country == 'rhodesia and nyasaland' and year == 1960 and 'bank of rhodesia and nyasaland' in issuer)
+            or (country == 'rhodesia' and year == 1966 and 'reserve bank of rhodesia' in issuer)):
+        factor = _unit(unit, 2.8)
+        if factor is not None:
+            return _rule('Rhodesian pound official dollar value', 'USA', 'USD', factor,
+                         'https://www.bis.org/publ/arpdf/archive/ar1960_en.pdf',
+                         'US purchasing-power benchmark at the official 2.80 dollars per Rhodesian pound. The 1966 gold link preserved nominal parity but blocked sterling dealings and exchange restrictions are not measured.',
+                         ('https://digitallibrary.un.org/record/848360/files/A_6300_ADD-1_PART-I-EN.pdf',
+                          'https://www.bankofengland.co.uk/-/media/boe/files/annual-report/1966/boe-1966.pdf'))
+    if country == 'suriname' and year == 1960 and _matches(r'government of suriname|centrale bank van suriname', issuer) and re.fullmatch(r'gulden|guilders?|florins?', unit):
+        return _rule('Suriname original guilder official dollar parity', 'USA', 'USD', 1/1.88585,
+                     'https://www.elibrary.imf.org/view/journals/024/1971/003/article-A007-en.xml',
+                     'US purchasing-power benchmark at 1.88585 Suriname guilders per dollar; the Suriname unit is independent of the Dutch guilder and predates the later Suriname dollar.')
+    if country == 'lebanon' and year == 1950 and _matches(r'republique libanaise|lebanese republic|banque de syrie et du liban', issuer):
+        sub = 1 if re.fullmatch(r'(?:lebanese )?pounds?|livres?', unit) else .01 if re.fullmatch(r'piastres?', unit) else None
+        if sub is not None:
+            rule = _rule('Lebanese pound historical annual exchange', 'USA', 'USD', sub/3.74,
+                         'https://www.elibrary.imf.org/abstract/book/9781557754592/ch006.xml',
+                         'US purchasing-power benchmark using the 1950 period-average rate of 3.74 Lebanese pounds per dollar; the narrow formal parity is not substituted for this observed rate.')
+            rule.update(kind='historical_quote', source_period='Observed Lebanese-pound/USD period average, 1950',
+                        method='Historical observed-rate benchmark: face Lebanese pounds ÷ 3.74 pounds per USD × US CPI change from 1950; 100 piastres = one pound. ' + rule['basis'])
+            return rule
+    if country == 'iran' and year == 1954 and _matches(r'bank melli iran|bank-e melli iran|national bank of iran', issuer) and re.fullmatch(r'rials?', unit):
+        rule = _rule('Iranian commercial-import dollar-rate benchmarks', 'USA', 'USD', 1/90.50,
+                     'https://www.bis.org/publ/arpdf/archive/ar1955_en.pdf',
+                     '1954 commercial-import-rate benchmarks: 90.50 rials per dollar before August and 84.50 after the August change. These two documented rates are not a full-year market minimum/maximum or all-transaction purchasing power.',
+                     ('https://www.imf.org/external/pubs/ft/ar/archive/pdf/ar1955.pdf',))
+        rule.update(kind='historical_range', factor_high=1/84.50, source_period='Commercial-import selling rates before/after August 1954',
+                    method='Historical commercial-import benchmarks: face rials ÷ 90.50 and ÷ 84.50 rials per USD, then US CPI change from 1954; show both results without averaging. ' + rule['basis'])
+        return rule
+    if country == 'peru' and year == 1941 and 'banco central de reserva del peru' in issuer and re.fullmatch(r'sol(?:es)?(?: de oro)?', unit):
+        return _rule('Peruvian sol de oro official dollar exchange', 'USA', 'USD', 1/6.50,
+                     'https://www.bcrp.gob.pe/docs/Publicaciones/Memoria/Memoria-BCRP-1961.pdf',
+                     'US purchasing-power benchmark at the 1941 rate of 6.50 soles de oro per dollar (BCRP historical table, Annex XXIII); not the later inti or modern sol.')
+    if country == 'peru' and year == 1960 and 'banco central de reserva del peru' in issuer and re.fullmatch(r'sol(?:es)?(?: de oro)?', unit):
+        rule = _rule('Peruvian sol de oro national-income exchange benchmark', 'USA', 'USD', 1/27.31,
+                     'https://digitallibrary.un.org/record/1474303/files/A_CN-2_R-204-EN.pdf',
+                     'US purchasing-power benchmark using the UN/IMF 1960 national-income conversion rate, 27.31 soles de oro per dollar, based on quarterly exchange averages; not the later inti or modern sol.')
+        rule.update(kind='historical_quote', source_period='UN/IMF quarterly-average conversion, 1960',
+                    method='Historical national-income-rate benchmark: face soles de oro ÷ 27.31 soles per USD × US CPI change from 1960. ' + rule['basis'])
+        return rule
+    if country == 'colombia' and year == 1954 and _matches(r'banco de la republica|bank of the republic', issuer):
+        factor = 1/2.50 if re.fullmatch(r'pesos?', unit) else .01/2.50 if re.fullmatch(r'centavos?', unit) else None
+        if factor is not None:
+            rule = _rule('Colombian peso effective import-rate benchmark', 'USA', 'USD', factor,
+                         'https://documents1.worldbank.org/curated/en/989651468241464264/pdf/multi0page.pdf',
+                         'US purchasing-power benchmark at the effective average import rate of 2.50 Colombian pesos per dollar in 1954. Export and other transaction rates differed; this is not domestic purchasing power.')
+            rule.update(kind='historical_quote', source_period='Effective average import exchange rate, 1954',
+                        method='Historical import-rate benchmark: face pesos ÷ 2.50 pesos per USD × US CPI change from 1954. ' + rule['basis'])
+            return rule
+    if country == 'afghanistan' and year == 1961 and _matches(r'da afghanistan bank|bank of afghanistan', issuer) and re.fullmatch(r'afghanis?', unit):
+        rule = _rule('Afghan old-afghani national-income exchange benchmark', 'USA', 'USD', 1/43.93,
+                     'https://digitallibrary.un.org/record/1474303/files/A_CN-2_R-204-EN.pdf',
+                     'US purchasing-power benchmark using the UN/IMF 1961 national-income conversion rate of 43.93 old afghanis per dollar; not a measured household exchange rate or the 2002 unit.')
+        rule.update(kind='historical_quote', source_period='UN/IMF national-income conversion rate, 1961',
+                    method='Historical national-income-rate benchmark: face old afghanis ÷ 43.93 afghanis per USD × US CPI change from 1961. ' + rule['basis'])
+        return rule
+    if country == 'cuba' and year == 1958 and _matches(r'banco nacional de cuba|national bank of cuba', issuer) and re.fullmatch(r'pesos?', unit):
+        return _rule('Cuban pre-1959 peso dollar parity', 'USA', 'USD', 1,
+                     'https://history.state.gov/historicaldocuments/frus1958-60v06/d255',
+                     'US purchasing-power benchmark at the pre-1959 one-peso-per-dollar parity; excludes subsequent controls and later peso regimes.',
+                     ('https://www.bis.org/publ/arpdf/archive/ar1959_en.pdf',))
+    if country == 'uganda' and issuer == 'bank of uganda' and year == 1966 and re.fullmatch(r'shillings?', unit):
+        return _rule('Uganda initial national shilling parity', 'USA', 'USD', .14,
+                     'https://www.elibrary.imf.org/abstract/book/9781451971477/ch023.xml',
+                     'US purchasing-power benchmark at the August 1966 initial parity of 14 US cents per old Ugandan shilling; not the later reformed shilling.')
+    if country in ('italian somaliland', 'somalia') and 'cassa per la circolazione monetaria della somalia' in issuer and year == 1950 and re.fullmatch(r'somalo|somali', unit):
+        return _rule('Somalo initial official parity', 'USA', 'USD', .14,
+                     'https://www.bis.org/publ/arpdf/archive/ar1961_it.pdf',
+                     'US purchasing-power benchmark at the May 1950 parity of approximately 7.14286 somali per dollar; this is not an Italian-lira conversion.',
+                     ('https://cdn.un.org/unyearbook/yun/chapter_pdf/1951YUN/1951_P1_SEC5.pdf',))
+    if country in ('yemen', 'south arabia', 'south yemen') and 'south arabian currency authority' in issuer and 1965 <= year <= 1967:
+        factor = 1 if re.fullmatch(r'dinars?', unit) else .001 if unit in ('fils', 'fil') else None
+        return gb('South Arabian dinar sterling parity', factor,
+                  'https://digitallibrary.un.org/nanna/record/848369/files/A_6300_ADD-4-EN.pdf?registerDownload=1&version=1&withMetadata=0&withWatermark=0',
+                  'One South Arabian dinar = one pound sterling; 1,000 fils = one dinar. This is not the North Yemeni rial.')
+    if country == 'greece' and _matches(r'bank of greece|national bank of greece', issuer) and re.fullmatch(r'drachma|drachmai|drachmas|drachmes', unit):
+        annual = {1914: 5.165, 1926: 79.563, 1935: 108.425}
+        if year in annual:
+            rule = _rule('Greek paper drachma annual exchange rate', 'USA', 'USD', 1/annual[year],
+                         GREEK_HISTORY_URL,
+                         'US purchasing-power benchmark using the Bank of Greece historical annual drachma/USD rate (Table GR3_A); not a modern-drachma conversion or a measured Greek price basket.')
+            rule['kind'] = 'historical_fx'
+            return rule
+        # These are indices of prices in the OLD drachma. The 1939 anchor
+        # avoids applying modern currency reforms to wartime paper amounts.
+        index = {1941: 309.3, 1943: 28613.4, 1944: 1731907751492.3}.get(year)
+        old_1944 = (_matches(r'occupation', evidence)
+                    and _matches(r'\b(?:50[ ,]?000|100[ ,]?000)\b', str(note.get('denomination', ''))))
+        if (index and _matches(r'^bank of greece(?:\s*\(|$)', issuer) and (year != 1944 or old_1944)
+                and not _matches(r'new drachma|post.?war|post.?liberation|november (?:11|12)', evidence)):
+            period = 'Athens average price index, January–10 November 1944 (old drachma only)' if year == 1944 else 'Athens average price index, ' + str(year)
+            rule = _rule('Athens wartime price index through a 1939 dollar anchor', 'USA', 'USD', 100.2/index/125.090,
+                         GREEK_HISTORY_URL,
+                         'Athens price-index benchmark via 1939 USD, at the published mean-price level. Wartime inflation caused very large changes within the year; this is not the value on a particular issue or spending date.' + (' The 1944 observation covers January–10 November only, before the new drachma.' if year == 1944 else ''))
+            rule.update(kind='historical_price', reference_year=1939, source_period=period,
+                        method='Historical Athens-price benchmark: old-drachma face value × 1939 Athens index (100.2) ÷ selected-year mean Athens price index ÷ 1939 drachmas per USD (125.090) × US CPI change from 1939 to the current period. ' + rule['basis'])
+            return rule
+    if country == 'china' and _matches(r'^(?:the )?bank of (?:china|communications)(?:\s*\(|$)', issuer) and year in (1937, 1941) and re.fullmatch(r'yuan|dollars?', unit) and not _matches(r'gold yuan|silver yuan|military|occupation|japanese|central reserve|federal reserve', evidence):
+        rule = _rule('Chinese national legal-tender yuan quoted exchange', 'USA', 'USD', .296064 if year == 1937 else .053133,
+                     FED_EXCHANGE_URL,
+                     'US purchasing-power benchmark using Federal Reserve Table 173 New York quotations for the national legal-tender yuan; exchange restrictions and local prices are not measured.' + (' The 1941 mean covers quotations only through July 25 and includes nominal quotations.' if year == 1941 else ''),
+                     ('https://fraser.stlouisfed.org/title/federal-reserve-bulletin-62/june-1936-20731/fulltext',))
+        rule.update(kind='historical_quote', source_period='Quoted yuan/USD: January–July 25, 1941; nominal-quotation flags' if year == 1941 else 'Quoted yuan/USD: calendar year 1937',
+                    method='Historical quoted-rate benchmark: face national yuan × ' + ('0.296064 USD/yuan (1937 full-year mean)' if year == 1937 else '0.053133 USD/yuan (1941 mean through July 25 only; nominal quotations included)') + ' × US CPI change from the selected year. ' + rule['basis'])
+        return rule
     # The explicit public issuer is necessary, including emergency States notes.
     island = [
         ('gibraltar', r'government of gibraltar|gibraltar government', 1934, 2100, 'https://gibraltar-stamps.com/index.php?action=index&controller=banknotes'),
@@ -259,6 +434,7 @@ def french_reference(note, year, unit):
     african = (_matches(r'banque de l.afrique occidentale|banque de madagascar|caisse centrale de la france', issuer)
                and _matches(r'africa|madagascar', country))
     cfa = (_matches(r'bceao|banque centrale des etats de l.afrique de l.ouest|institut d.emission de l.afrique equatoriale|banque de l.afrique occidentale', issuer) and _matches(r'africa|senegal|togo|benin|ivory coast|cote d.ivoire|niger|burkina|cameroon|chad|congo|gabon', country))
+    cfa = cfa or (year >= 1972 and country in ('cameroon', 'chad', 'central african republic', 'gabon', 'republic of the congo', 'equatorial guinea') and _matches(r'\bbeac\b|banque des etats de l.afrique centrale', issuer))
     cfa = cfa or (country == 'madagascar' and 'banque de madagascar' in issuer and year <= 1961)
     if african and 1870 <= year <= 1944:
         old_francs, family = 1, 'French colonial franc'
@@ -376,7 +552,7 @@ def unavailable_reason(note, years, unit):
         return 'This is identified as a counterfeit issue. Its printed face amount does not establish a redeemable monetary claim or historical purchasing power.'
     if country in ('french indo-china', 'french indochina') and any(y in (1930, 1945, 1953) for y in years):
         return 'The official piastre/franc parity changed during the comparison year. A dated issue or a sourced within-year range is needed; one annual parity has not been assumed.'
-    if country == 'hong kong' and any(y in (1935, 1941, 1945) for y in years):
+    if country == 'hong kong' and re.fullmatch(r'dollars?|cents?', unit) and any(y in (1935, 1941, 1945) for y in years):
         return 'This comparison year includes a monetary-standard or wartime transition. A dated issue or sourced annual benchmark is needed for this Hong Kong dollar.'
     if country == 'malawi' and unit == 'kwacha' and min(years) < 1971:
         return 'The recorded comparison year predates the kwacha’s 1971 introduction. Verify the Year (Series) field against the law or issue-series date; the saved date has not been changed.'
@@ -384,9 +560,17 @@ def unavailable_reason(note, years, unit):
         return 'The recorded comparison year predates Cayman dollar notes in 1972. Verify whether Year (Series) is the 1971 currency-law date or the note’s series year.'
     if 'japanese' in issuer and country != 'japan':
         return 'This Japanese occupation issue needs a sourced wartime exchange or price benchmark. The same-named national currency is not interchangeable with this note.'
+    if country == 'china' and min(years) <= 1935 and unit in ('yuan', 'dollar', 'dollars'):
+        return 'This pre-fabi Chinese note needs a matching silver-yuan or local redemption-rate source. Shanghai tael quotations and post-1935 legal-tender yuan rates are different units and have not been substituted.'
+    if country == 'israel' and 1952 in years:
+        return 'Israel used multiple transaction-specific exchange rates in 1952. A documented rate appropriate to this government fractional-note benchmark is still needed; modern shekel rates do not apply.'
+    if country == 'egypt' and 1958 in years:
+        return 'Egypt introduced export-pound and surcharge arrangements during 1958. The earlier sterling parity does not establish a representative annual exchange or local-price benchmark for this note.'
     if _matches(r'occupation|military', evidence):
         return 'Historical exchange or price evidence for this occupation or military currency is not established. Verify the issue identity and series year; ordinary national-currency rates have not been assumed.'
     if 'confederate' in country or 'confederate' in issuer:
+        if 'virginia' in issuer:
+            return 'This is a Virginia state-treasury claim, not a Confederate national note. Its redemption terms or a dated state-note exchange benchmark are needed before applying a Confederate depreciation scale.'
         return 'Confederate paper depreciated sharply; a dated regional exchange or price benchmark is needed. Its dollars cannot be treated as US dollars at face value.'
     if 'private' in plain(note.get('issue_type')) or 'scrip' in plain(note.get('issue_type')):
         return 'This private or local issue needs evidence for its face claim and any monetary conversion; a national currency relationship has not been assumed.'

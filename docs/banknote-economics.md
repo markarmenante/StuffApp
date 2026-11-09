@@ -87,8 +87,42 @@ Both use the displayed 2026 CPI estimate. These figures change when the shared
 public data changes. The legacy API fields `at_issue` and `at_issue_display`
 carry the series-year result for compatibility; `comparison_year` and
 `comparison_basis` explain its meaning. `estimate_kind` distinguishes `domestic_cpi`,
-`historical_parity` and `historical_fx`; `estimate_basis` remains visible outside
-the expandable sources.
+`historical_parity`, `historical_fx`, `historical_quote`, `historical_price` and
+`historical_range`; `estimate_basis` remains visible outside the expandable
+sources. All historical methods display **Series-year benchmark · today’s USD**.
+The domestic CPI method keeps its buying-power label.
+
+Historical quotations retain the source's actual observation period and transaction
+scope. Federal Reserve Table 173 supplies the national Chinese legal-tender yuan
+for 1937 and a partial 1941 mean through July 25, including nominal quotations;
+it does not identify the value of 1914 silver-yuan notes or Japanese military yen.
+The Hong Kong 1941 quotation mean ends December 24 and excludes occupation; the
+1935 silver-dollar annual average comes from HKMA/HKIMR, rather than applying the
+late-year sterling peg to the entire year. These rates do not establish when an
+individual note was first issued or spent.
+
+For Bank of Greece occupation notes, the reviewed Athens price index is measured
+in **old drachmas**. The formula is face amount × Athens index in 1939 (100.2) ÷
+the selected year's mean price index ÷ 1939 drachmas per USD (125.090), followed by
+US CPI change **from 1939**. This is an Athens-price benchmark through a historical
+dollar anchor, not a modern Greek-currency conversion. The 1944 index covers only
+January–10 November; that rule requires an identified old occupation issue and
+excludes the new drachma. Hyperinflation makes a mean-price result very different
+from values at individual dates. The source's monthly averages, reconstructed
+where official reporting stopped, and this limitation remain explicit.
+
+Intervals are preserved instead of replaced with a midpoint. The North Carolina
+legal scale supplies the 1864 Confederate **new-issue** benchmark for April–December:
+18–49 Confederate dollars per gold US dollar. *Haughton v. Merony* expressly applies
+the scale to new-issue currency. Gold dollars are converted at the gold-unit ratio
+4.8665 per pound sterling, then UK CPI is applied. This avoids treating Civil War
+gold dollars as paper US dollars. It is a retrospective regional legal benchmark;
+Virginia state-treasury claims and explicitly old-issue notes do not inherit it.
+Iran's 1954 commercial-import comparison shows the two documented selling rates,
+90.50 and 84.50 rials per dollar, before and after August. It describes two scoped
+benchmarks, not guaranteed full-year extrema or all-transaction purchasing power.
+Colombia's 1954 effective import rate and Laos's 1957 restricted official rate are
+also labelled by transaction scope; free-market and export values could differ.
 
 Data sources (anonymous public reads, no credentials or note data):
 
@@ -103,6 +137,20 @@ Data sources (anonymous public reads, no credentials or note data):
 - [Jordà–Schularick–Taylor Macrohistory Database, release 6](https://www.macrohistory.net/database/): historical CPI for reviewed reference economies. Missing observations are rebased at a shared 2010 observation; current World Bank observations retain precedence. Historical FX columns are deliberately excluded because several have been adjusted for currency reforms.
 - [World Bank / IMF official annual exchange rates PA.NUS.FCRF](https://data.worldbank.org/indicator/PA.NUS.FCRF): selected, explicitly gated currency units, with source year shown. Official rates may differ from accessible or unofficial rates. World Bank attribution: CC BY 4.0.
 - Each monetary rule includes its own institutional source URL. These include central-bank histories, contemporary IMF and World Bank reports, monetary legislation and historical currency-board research. Rules distinguish CFA from CFP and Comorian francs, and national from occupation issues.
+- [Federal Reserve, Banking and Monetary Statistics 1914–1941, Table 173](https://fraser.stlouisfed.org/title/banking-monetary-statistics-1914-1941-38/part-i-6408/fulltext): historical currency quotations, their units, nominal flags and partial-year dates. The selected facts are from the original US government publication, not a licensed third-party bulk dataset.
+- [Bank of Greece, Greece from 1833 to 1949](https://www.bankofgreece.gr/BogDocumentEn/III.%20GREECE.pdf): Tables GR3_A and GR7_A, with the wartime price methodology and source breaks on pages 139–142. Prewar paper-drachma annual rates are separate from the wartime price-index method.
+- [The Confederate Note Case, US Reports 86, page 552](https://www.govinfo.gov/content/pkg/USREPORTS-86/pdf/USREPORTS-86-548.pdf) and [Haughton v. Merony, 65 NC 124](https://calculators.law/caselaw/decisions/oeW8n7npk3dM/haughton-v-merony): the regional gold-value scale and its application to the 1864 new issue. The [US Gold Commission report](https://fraser.stlouisfed.org/title/report-congress-commission-role-gold-domestic-international-monetary-systems-339/volume-i-6346/fulltext) documents the gold units behind the sterling conversion.
+- [BIS 1955 annual report](https://www.bis.org/publ/arpdf/archive/ar1955_en.pdf) and [IMF 1955 annual report](https://www.imf.org/external/pubs/ft/ar/archive/pdf/ar1955.pdf): the dated Iranian commercial-import selling-rate benchmarks.
+
+Additional bounded rules retain their sources next to the factors: Egyptian
+piastres before July 1947; Faroese/Danish parity; Greenland trading-post Danish
+face claims with restricted redemption; old Israeli pounds; initial Ugandan
+shillings and Somali somali; South Arabian dinars; early Burundi francs; Rhodesian
+official dollar values subject to blocked exchange; Suriname guilders; selected
+Peruvian soles de oro; Lebanese observed rates; and the documented UN national-income
+conversion rates for Afghanistan and Peru. BEAC's CFA issuer alias is distinct from
+the New Hebrides 1980 annual exchange rule: the latter unit was renamed vatu at
+unchanged value in 1981 and does not use CFP parity.
 
 The separate derived JST file `data/banknote-historical-economics.json` retains
 **CC BY-NC-SA 4.0** licensing and attribution. Citation: Òscar Jordà, Moritz
@@ -126,8 +174,11 @@ Tests disable refresh and use synthetic collection rows.
 Unsupported monetary reforms, competing/occupation currencies, undocumented
 historical relationships, ambiguous subunits and unresolved comparison dates
 return Unavailable with an explanation. In particular Brazilian mil-réis,
-pre-reform Chinese yuan and Reichsmark are never treated as modern reais, yuan
-or Deutsche Mark. Tiny nonzero amounts display as less than one cent, not zero.
+unsupported pre-reform Chinese yuan and Reichsmark are never treated as modern
+reais, yuan or Deutsche Mark. Reviewed 1937/1941 fabi quotations are explicit
+exceptions, not a general Chinese-yuan conversion. Multiple-rate regimes, missing
+denominations and unresolved dates retain specific explanations. Tiny nonzero
+amounts display as less than one cent, not zero.
 
 Regression coverage: `tests/test_banknote_economics.py`,
 `tests/test_banknote_historical_economics.py`, and the desktop/mobile

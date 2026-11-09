@@ -337,9 +337,10 @@ def calculate(note, data, today=None):
     if banknote_catalog.canonical_country(note.get('country')) in EURO and not re.search(r'\beuros?\b', _plain(note.get('denomination'))):
         result['sources'].append(dict(name='ECB fixed euro conversion rates', url=ECB_URL))
     series = data.get('cpi', {}).get(iso, {})
+    cpi_years = [r.get('reference_year', y) for r, y in zip(rules, yy)] if historical else yy
     original_values = series.get('values', {})
     values, extended = banknote_historical_rates.cpi_values(iso, series)
-    if not colonial and extended and any(str(y) not in original_values and str(y) in values for y in yy):
+    if not colonial and extended and any(str(y) not in original_values and str(y) in values for y in cpi_years):
         result['sources'].append(dict(name='Historical Statistics of the United States: CPI table Cc1' if iso == 'USA' else 'Jordà–Schularick–Taylor historical CPI (CC BY-NC-SA 4.0)', url=HISTORICAL_US_CPI_URL if iso == 'USA' else banknote_historical_rates.JST_URL))
         result['data_dates'].append('HSUS reconstructed historical CPI; modern 1982–84 base' if iso == 'USA' else 'JST release 6 historical CPI; rebased at 2010')
     current = series.get('current', {})
@@ -353,13 +354,14 @@ def calculate(note, data, today=None):
         valid_base = all(isinstance(v, (int, float)) and not isinstance(v, bool)
                          and math.isfinite(v) and v > 0 for v in anchors)
         values = {'1776': CONNECTICUT_1776_CPI * (sum(anchors) / 3) / 100} if valid_base else {}
-    if (yy and recent and all(str(y) in values and y <= today.year for y in yy)
+    if (yy and recent and all(str(y) in values and y <= today.year for y in cpi_years)
             and isinstance(end, (int, float)) and not isinstance(end, bool)
             and math.isfinite(end) and end > 0):
-        converted = [amount * (rules[i]['factor'] if historical else factor) * end / values[str(y)] * rate for i, y in enumerate(yy)
-                     if isinstance(values[str(y)], (int, float)) and not isinstance(values[str(y)], bool)
-                     and math.isfinite(values[str(y)]) and values[str(y)] > 0]
-        if len(converted) == len(yy):
+        valid_prices = all(isinstance(values[str(y)], (int, float)) and not isinstance(values[str(y)], bool)
+                           and math.isfinite(values[str(y)]) and values[str(y)] > 0 for y in cpi_years)
+        converted = [amount * f * end / values[str(y)] * rate for i, y in enumerate(cpi_years)
+                     for f in (_reference_factors(rules[i]) if historical else [factor])] if valid_prices else []
+        if converted:
             lo, hi = min(converted), max(converted)
             result.update(at_issue=lo if lo == hi else [lo, hi],
                           at_issue_display='≈ ' + (money(lo) if lo == hi else money(lo) + '–' + money(hi)))
@@ -382,14 +384,22 @@ def calculate(note, data, today=None):
         missing = 'No comparable ' + iso + ' CPI data for ' + comparison['label'] + '; a sourced price series or historical exchange benchmark is needed.'
         result['note'] = ' '.join(filter(None, [result['note'], missing]))
     # Preserve small nonzero equivalents rather than misreporting them as zero.
-    result['method'] = ('Official annual FX benchmark: face value ÷ the selected year’s published local-currency units per USD × US CPI change to the current source period. This estimates US-dollar purchasing power, not the local basket or unofficial exchange value.' if historical and historical['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented parity × reference-country CPI change × current USD exchange rate. ' + historical['basis'] if historical else result.get('method') or ('Historical face-value estimate: 6 shillings in Connecticut money = 1 Spanish milled dollar; apply US CPI change from 1776 with both indices on the 1982–1984 base. This is an approximate dollar purchasing-power comparison, not a measured Connecticut price basket, paper-money trading value, collector value or redemption amount.'
+    result['method'] = (historical['method'] if historical and historical.get('method') else 'Official annual FX benchmark: face value ÷ the selected year’s published local-currency units per USD × US CPI change to the current source period. This estimates US-dollar purchasing power, not the local basket or unofficial exchange value.' if historical and historical['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented parity × reference-country CPI change × current USD exchange rate. ' + historical['basis'] if historical else result.get('method') or ('Historical face-value estimate: 6 shillings in Connecticut money = 1 Spanish milled dollar; apply US CPI change from 1776 with both indices on the 1982–1984 base. This is an approximate dollar purchasing-power comparison, not a measured Connecticut price basket, paper-money trading value, collector value or redemption amount.'
                         if colonial else
                         'Series-year comparison: face value × domestic CPI change × USD exchange rate. Today: the same nominal amount × USD exchange rate. Fixed euro conversions are applied where needed. These compare face-value spending power, not collector value or redemption eligibility; the comparison year is not a verified issue date.'))
     if historical and historical['kind'] == 'historical_fx':
         result['data_dates'].append('Official annual FX ' + comparison['label'])
+    if historical:
+        result['data_dates'].extend(r['source_period'] for r in rules if r.get('source_period'))
+        result['data_dates'].extend('Reference CPI anchor ' + str(r['reference_year']) for r in rules if r.get('reference_year'))
     result['sources'] = list({source['url']: source for source in result['sources']}.values())
     result['data_dates'] = list(dict.fromkeys(result['data_dates']))
     return result
+
+
+def _reference_factors(rule):
+    """A documented interval remains an interval; it is never averaged away."""
+    return [rule['factor'], rule['factor_high']] if 'factor_high' in rule else [rule['factor']]
 
 
 def _reference_estimate(rules, amount, yy, data, today):
@@ -403,18 +413,19 @@ def _reference_estimate(rules, amount, yy, data, today):
     values, extended = banknote_historical_rates.cpi_values(rule['iso'], series)
     rate = 1 if rule['code'] == 'USD' else data.get('fx', {}).get('usd_per_unit', {}).get(rule['code'])
     end = current.get('value')
-    numbers = [rate, end] + [values.get(str(y)) for y in yy]
+    cpi_years = [r.get('reference_year', y) for r, y in zip(rules, yy)]
+    numbers = [rate, end] + [values.get(str(y)) for y in cpi_years]
     if not all(isinstance(v, (float, int)) and not isinstance(v, bool) and math.isfinite(v) and v > 0 for v in numbers): return None
-    converted = [amount * r['factor'] * rate * end / values[str(y)] for r, y in zip(rules, yy)]
+    converted = [amount * f * rate * end / values[str(y)] for r, y in zip(rules, cpi_years) for f in _reference_factors(r)]
     lo, hi = min(converted), max(converted)
     sources = list(rule['sources']) + [dict(name=series.get('name', 'Consumer price index'), url=series['source_url'])]
-    if extended and any(str(y) not in series.get('values', {}) for y in yy):
+    if extended and any(str(y) not in series.get('values', {}) for y in cpi_years):
         sources.append(dict(name='Historical Statistics of the United States: CPI table Cc1' if rule['iso'] == 'USA' else 'Jordà–Schularick–Taylor historical CPI', url=HISTORICAL_US_CPI_URL if rule['iso'] == 'USA' else banknote_historical_rates.JST_URL))
     if rule['code'] != 'USD': sources.append(dict(name='ECB exchange rates via Frankfurter', url=FX_URL))
     return dict(at_issue=lo if lo == hi else [lo, hi], at_issue_display='≈ ' + (money(lo) if lo == hi else money(lo) + '–' + money(hi)),
                 estimate_kind=rule['kind'], estimate_basis=rule['basis'], sources=sources,
-                data_dates=['Reference CPI ' + str(current.get('period'))] + (['Official annual FX ' + str(min(yy)) + ('–' + str(max(yy)) if len(yy)>1 else '')] if rule['kind'] == 'historical_fx' else ['FX ' + str(data.get('fx', {}).get('date', ''))] if rule['code'] != 'USD' else []),
-                method=('Official annual FX benchmark: face value ÷ selected-year local-currency units per USD × US CPI change. ' if rule['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented monetary parity × reference-country CPI change × current USD exchange rate. ') + rule['basis'])
+                data_dates=['Reference CPI ' + str(current.get('period'))] + (['Official annual FX ' + str(min(yy)) + ('–' + str(max(yy)) if len(yy)>1 else '')] if rule['kind'] == 'historical_fx' else ['FX ' + str(data.get('fx', {}).get('date', ''))] if rule['code'] != 'USD' else []) + [r['source_period'] for r in rules if r.get('source_period')] + ['Reference CPI anchor ' + str(r['reference_year']) for r in rules if r.get('reference_year')],
+                method=rule.get('method') or ('Official annual FX benchmark: face value ÷ selected-year local-currency units per USD × US CPI change. ' if rule['kind'] == 'historical_fx' else 'Historical benchmark: face value × documented monetary parity × reference-country CPI change × current USD exchange rate. ') + rule['basis'])
 
 
 def parse_fed(document):

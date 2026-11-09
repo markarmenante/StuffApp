@@ -13,7 +13,7 @@
       if (!response.ok) throw new Error('Economic data could not be refreshed.');
       const data = await response.json();
       if (request !== generation) return;
-      panel.querySelector('[data-economic-comparison-label]').textContent = ['historical_parity', 'historical_fx'].includes(data.estimate_kind)
+      panel.querySelector('[data-economic-comparison-label]').textContent = String(data.estimate_kind || '').startsWith('historical_')
         ? 'Series-year benchmark · today’s USD' : 'Buying power in series year · today’s USD';
       panel.querySelectorAll('[data-economic]').forEach(el => {
         const value = data[el.dataset.economic];

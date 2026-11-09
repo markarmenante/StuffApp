@@ -6,7 +6,7 @@
         <label for="banknoteIssueDate" class="economic-label">Probable issue date</label>
         <input id="banknoteIssueDate" name="issue_date" value="{{ val('issue_date') }}" placeholder="{{ economics.probable_issue_date }}" title="Optional actual release year or range, e.g. 1925 or 1925–1928. Kept separately from the series-year buying-power comparison." autocomplete="off">
       </div>
-      <div><span class="economic-label" data-economic-comparison-label>{% if economics.estimate_kind in ['historical_parity', 'historical_fx'] %}Series-year benchmark · today’s USD{% else %}Buying power in series year · today’s USD{% endif %}</span><span data-economic="at_issue_display">{{ economics.at_issue_display }}</span></div>
+      <div><span class="economic-label" data-economic-comparison-label>{% if (economics.estimate_kind or '').startswith('historical_') %}Series-year benchmark · today’s USD{% else %}Buying power in series year · today’s USD{% endif %}</span><span data-economic="at_issue_display">{{ economics.at_issue_display }}</span></div>
       <div><span class="economic-label">Buying power today · USD</span><span data-economic="today_display">{{ economics.today_display }}</span></div>
     </div>
     <div class="economic-basis">Comparison year: <span data-economic="comparison_year">{{ economics.comparison_year|default('Unknown') }}</span>. <span data-economic="comparison_basis">{{ economics.comparison_basis|default('') }}</span></div>
