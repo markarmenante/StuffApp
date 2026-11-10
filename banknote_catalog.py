@@ -70,6 +70,7 @@ ALIASES = {
         'Territory of the Afars and the Issas',
         'Territoire français des Afars et des Issas'),
     'Rhodesia and Nyasaland': ('Rhodesia & Nyasaland',),
+    'Trinidad and Tobago': ('Trinidad & Tobago',),
     'Saint Pierre and Miquelon': ('Saint Pierre & Miquelon', 'St. Pierre and Miquelon'),
     'São Tomé and Príncipe': ('Sao Tome and Principe', 'São Tomé & Príncipe'),
     'Réunion': ('Reunion',),
@@ -406,6 +407,7 @@ PERIODS = {
     'Malawi': ('british', 1891, 1964, 'British protectorate / independence transition'),
     'Malaya': ('british', 1786, 1957, 'British settlements, protected states and Federation of Malaya'),
     'Tonga': ('british', 1900, 1970, 'British protected state'),
+    'Trinidad and Tobago': ('british', 1899, 1962, 'British colonial administration'),
     'Maldives': ('british', 1887, 1965, 'British protected state'),
     'Malta': ('british', 1800, 1964, 'British colonial administration'),
     'Mauritius': ('british', 1810, 1968, 'British colonial administration'),
@@ -480,6 +482,8 @@ EASTERN_CARIBBEAN_ISSUERS = {
 _CARIBBEAN_ISSUER_NAMES = {
     'bccb': ('British Caribbean Currency Board', 'BCCB',
              'Currency Board of Eastern Caribbean Territories',
+             'Currency Board of the British Caribbean Territories (Eastern Group)',
+             'Currency Board of British Caribbean Territories (Eastern Group)',
              'British Caribbean Territories Currency Board',
              'British Caribbean Currency Board (The British Caribbean Territories, Eastern Group)',
              'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)',
@@ -927,7 +931,8 @@ def classify(country, date=None, issuer=None, series=None):
         key, start, end, label = PERIODS[country]
         # Independent issuers resolve mixed / boundary-year records before dates.
         independent = any(s in evidence for s in ('banquecentraledalgerie', 'banconacionaldecuba',
-                         'reservebankofmalawi', 'republicofcyprus'))
+                         'reservebankofmalawi', 'republicofcyprus',
+                         'centralbankoftrinidadandtobago', 'centralbankoftrinidadtobago'))
         if independent:
             return other('Independent national issue')
         if y and start <= y < end:

@@ -54,7 +54,7 @@ class CaribbeanTests(unittest.TestCase):
         self.add('qeii5', None, 'Currency Board of Eastern Caribbean Territories',
                  '5 Dollars', 'P-9b', 1957, '1953–1964 Elizabeth II issue')
         self.add('kgvi1', 'British Caribbean Territories (Eastern Group)',
-                 'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)',
+                 'Currency Board of the British Caribbean Territories (Eastern Group)',
                  '1 Dollar', 'P-1a', 1951, '1950–1952 King George VI issue')
         self.add('authority1', 'East Caribbean States', 'East Caribbean Currency Authority',
                  '1 Dollar', 'P-13g', 1965, 'Queen Elizabeth II issue')
@@ -77,6 +77,18 @@ class CaribbeanTests(unittest.TestCase):
                 resolved = catalog.eastern_caribbean_issue('British Caribbean Territories', 1951, ambiguous)
                 self.assertEqual(resolved['key'], 'unresolved')
                 self.assertNotIn('denoms', resolved)
+
+    def test_full_currency_board_names_resolve_without_merging_other_authorities(self):
+        for issuer in ('Currency Board of the British Caribbean Territories (Eastern Group)',
+                       'Currency Board of British Caribbean Territories (Eastern Group)',
+                       'Board of Commissioners of Currency, British Caribbean Territories (Eastern Group)'):
+            for country in ('British Caribbean Territories', 'British Caribbean Territories (Eastern Group)', None):
+                with self.subTest(country=country, issuer=issuer):
+                    self.assertEqual(catalog.eastern_caribbean_issue(country, 1950, issuer)['key'], 'bccb')
+            self.assertIsNone(catalog.eastern_caribbean_issue('Canada', 1950, issuer))
+            for suffix in (' (unconfirmed)', ' or ECCA'):
+                self.assertEqual(catalog.eastern_caribbean_issue(
+                    'British Caribbean Territories', 1950, issuer + suffix)['key'], 'unresolved')
 
     def test_king_george_vi_and_elizabeth_ii_share_one_board_section(self):
         self.board_monarch_fixture()

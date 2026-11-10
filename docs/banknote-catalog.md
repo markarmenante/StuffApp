@@ -323,6 +323,13 @@ rewrite the stored country or issuer. Migration **v35** refreshes only derived
 P positions once, preserving permanent B numbers, full catalogue references,
 photos, prices and all other saved record fields.
 
+The equivalent full names `Currency Board of the British Caribbean Territories
+(Eastern Group)` and `Currency Board of British Caribbean Territories (Eastern
+Group)` also resolve to the same BCCB section. The original issuer text is
+preserved on each note. Migration **v41** refreshes derived positions after this
+correction; the same regression fixture covers George VI and Elizabeth II
+notes in the list, both History modes, and the report.
+
 Within an issuer, equivalent dated/undated series labels file together before
 numeric denominations and the full natural-order catalogue reference. Written
 dollar denominations such as `Five Dollars` compare with `$5` in this regional
@@ -367,6 +374,18 @@ not split into an independent issue and a missing French territory. French
 Somaliland and independent Djibouti remain separate. Migration v29 refreshes
 display positions after this correction, preserving permanent catalogue IDs
 and other note facts; the original country spelling remains in the alias audit.
+
+`Trinidad & Tobago` normalizes to **Trinidad and Tobago**. Dated notes in the
+reviewed 1899–1962 colonial period now use the British group, matching the
+existing entity/Market Scan period. This includes the 1939 and 1943 government
+issues. Independence was [31 August 1962](https://history.state.gov/countries/trinidad-and-tobago);
+year-only 1962 records remain marked as a transition, and later or Central Bank
+issues do not count as colonial holdings. See also the [Central Bank's currency
+history](https://www.central-bank.org.tt/bank-notes-and-coins/history-of-money-in-trinidad-and-tobago/).
+The spelling migration retains the original country in the audit table;
+**v41** resequences only display positions. `test_trinidad_filing.py` covers
+alias search, filters, reports, coverage, preservation, idempotency and migration
+failure/retry.
 
 Create, edit, autosave, AI intake, Market Buy/Bought and Sweep import normalize
 country spellings. Startup normalizes existing aliases before older intake

@@ -6,6 +6,7 @@ import sys
 suites = [
     'test_banknote_catalog.py', 'test_banknote_sort.py', 'test_banknote_economics.py', 'test_banknote_historical_economics.py', 'test_coin_economics.py',
     'test_bahrain_filing.py', 'test_bahrain_classification.py',
+    'test_trinidad_filing.py', 'test_banknote_caribbean.py',
     'test_monitoring.py', 'test_ebay_orders.py', 'test_ebay_mail.py', 'test_ebay_purchase_lookup.py',
     'test_ebay_browser_requests.py', 'test_ebay_browser_setup.py',
     'test_ebay_matching.py', 'test_banknote_imports.py', 'test_banknote_import_consistency.py', 'test_banknote_review_currency.py', 'test_banknote_photo_sides.py',

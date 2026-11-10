@@ -26,7 +26,7 @@ from pathlib import Path
 from flask import Flask,render_template_string
 repo=Path(sys.argv[1]); detail=(repo/'templates/detail.html').read_text()
 start=detail.index('  <!-- Banknote images (front + back)')
-end=detail.index('  <!-- Denomination / Material / Date / Age -->',start)
+end=detail.index('  <!-- Denomination /',start)
 block=detail[start:end]
 start=detail.index('// Click-to-upload helper for watch-photo-style labels')
 end=detail.index("document.querySelectorAll('.drop-zone').forEach(zone =>",start)

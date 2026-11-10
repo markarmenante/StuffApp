@@ -7040,6 +7040,27 @@ def init_db():
         db.execute('RELEASE SAVEPOINT banknote_display_number_v40')
         db.commit()
 
+    # v41: Trinidad's colonial notes and the explicitly named British Caribbean
+    # Territories Currency Board join their existing historical/issuer groups.
+    # Country spelling normalization is audited above; only P positions reseed.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v41',),
+    ).fetchone():
+        db.execute('SAVEPOINT banknote_display_number_v41')
+        try:
+            _renumber_banknotes(db)
+            db.execute(
+                "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+                ('banknote_display_number_v41', datetime.utcnow().isoformat()),
+            )
+        except Exception:
+            db.execute('ROLLBACK TO SAVEPOINT banknote_display_number_v41')
+            db.execute('RELEASE SAVEPOINT banknote_display_number_v41')
+            raise
+        db.execute('RELEASE SAVEPOINT banknote_display_number_v41')
+        db.commit()
+
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)

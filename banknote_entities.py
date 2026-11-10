@@ -534,6 +534,11 @@ def entity_for_row(row, classification=None):
         period = catalog.bahrain_issue(values.get('country'), values.get('date_1'),
                                        values.get('issuer'), values.get('series'))
         return ENTITY_BY_KEY['british-bahrain'] if period and period['group'] == 'british' else None
+    if country == 'Trinidad and Tobago':
+        # Use the same dated filing, including modern-issuer contradictions;
+        # the broad date-only fallback must not credit an independent issue.
+        return (ENTITY_BY_KEY['british-trinidad-and-tobago']
+                if group == 'british' and not info.get('uncertain') else None)
     if country == 'Solomon Islands':
         # This shared name spans independence: only the reviewed dated filing
         # can credit the predecessor. Never reach the broad historical-name
