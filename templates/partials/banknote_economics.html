@@ -1,6 +1,7 @@
   {% set economics = banknote_economic_summary(r) %}
   <div class="dcell banknote-economics" id="banknoteEconomics" {% if r and r['id'] %}data-url="{{ url_for('banknote_economic_context', record_id=r['id']) }}"{% endif %}>
     <span data-economic="at_issue_display" aria-live="polite" title="Series year: {{ economics.comparison_year|default('Unknown') }}. {{ economics.estimate_basis|default('') }} {{ economics.comparison_basis|default('') }}{% if economics.at_issue is none %} {{ economics.note }}{% endif %}">{{ economics.at_issue_display }}</span>
+    <span class="clabel">Buying power</span>
     {# Preserve independently saved issue metadata on full-form saves. #}
     <input type="hidden" name="issue_date" value="{{ val('issue_date') }}">
   </div>
