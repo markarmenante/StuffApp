@@ -18,6 +18,7 @@ import market_estimates
 import market_slab_labels
 import market_unwatch
 import market_dealer_listing
+import market_listing_price
 import cloudflare_access
 import market_checkout
 import market_purchase_capture
@@ -17694,52 +17695,37 @@ def _market_page_gone(url, status, html=''):
     return b.count('/') + 1 < a.count('/') and len(b) < len(a) - 12
 
 
-_MARKET_PAGE_PRICE_RE = re.compile(
-    r'(?:(?:price|our price|sale price|buy it now|buy now|add to cart|add to basket|'
-    r'in stock)[^$€£0-9]{0,80})?'
-    r'((?:US\s?\$|USD\s?\$?|CA\$|C\$|A\$|\$|€|EUR\s?|£|GBP\s?|CHF\s?)\s?'
-    r'\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)', re.IGNORECASE)
-
-
 def _market_price_from_page(url):
-    """The asking price read off the listing page itself, for finds whose
-    search snippet showed none (most VCoins and dealer pages). Looks in
-    the JSON-LD / meta price first, then the first currency amount in
-    the visible text. Returns a price string or None."""
+    """Read the primary product's structured price; never shipping prose."""
     status, html = _market_fetch_page(url)
     if (status != 200 or not html or _market_page_challenged(status, html)
             or _market_listing_url_problem(url)
             or _market_listing_url_problem(getattr(_MARKET_LAST_URL, 'final', url))
             or _market_page_gone(url, status, html)):
         return None
-    m = re.search(r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?', html)
-    cur = re.search(r'"priceCurrency"\s*:\s*"([A-Z]{3})"', html)
-    if m:
-        amount = float(m.group(1))
-        if 10 <= amount < 10_000_000:
-            code = cur.group(1) if cur else 'USD'
-            prefix = _PRICE_CODE_PREFIX.get(code, code + ' ')
-            return f'{prefix}{amount:,.0f}' if amount == int(amount) else f'{prefix}{amount:,.2f}'
-    m = re.search(r'<meta[^>]+(?:product:price:amount|og:price:amount)[^>]+content="([\d.,]+)"', html, re.IGNORECASE)
-    if m:
-        cur2 = re.search(r'<meta[^>]+(?:product:price:currency|og:price:currency)[^>]+content="([A-Z]{3})"', html, re.IGNORECASE)
-        code = cur2.group(1) if cur2 else 'USD'
-        text = f"{code} {m.group(1)}"
-        formatted = _format_purchase_price(text)
-        if formatted:
-            return formatted
-    text = re.sub(r'<script.*?</script>|<style.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<[^>]+>', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    text = re.split(r"similar items|you may also like|related products|recommended for you|(?:sponsored items )?similar to what you['’]ve watched", text, maxsplit=1, flags=re.I)[0][:60_000]
-    for m in _MARKET_PAGE_PRICE_RE.finditer(text):
-        candidate = m.group(1).replace('US $', '$').replace('US$', '$')
-        formatted = _format_purchase_price(candidate)
-        if formatted:
-            _, amount = _parse_price_amount(formatted)
-            if amount and amount >= 10:
-                return formatted
+    evidence = market_listing_price.read(url, html)
+    if evidence and evidence['currency'] in _PRICE_CURRENCY_CODES:
+        return _format_purchase_price(f"{evidence['currency']} {evidence['amount']}")
     return None
+
+
+def _market_apply_listing_price(item, probe, db=None):
+    """A verified fixed ask overrides discovery text; paid records stay separate."""
+    evidence = probe.get('asking_price')
+    if (probe.get('state') != 'live' or not evidence
+            or item.get('sale_type') == 'auction'
+            or _market_listing_identity_problem(item, probe)
+            or evidence['currency'] not in _PRICE_CURRENCY_CODES):
+        return False
+    price = _format_purchase_price(f"{evidence['currency']} {evidence['amount']}")
+    if not price:
+        return False
+    item['price'] = price
+    item['price_usd'] = (_market_price_usd(db, price)
+                         if db is not None or evidence['currency'] == 'USD' else None)
+    item['asking_price_source'] = dict(evidence, url=probe.get('final') or item['listing_url'],
+                                        observed_at=datetime.utcnow().isoformat())
+    return True
 
 
 def _market_listing_probe(url, page=None):
@@ -17791,6 +17777,7 @@ def _market_listing_probe(url, page=None):
         if auction_heading or re.search(r'\bsearch results\b|^all products$|^(?:(?:current|our|all)\s+)?inventory$|^shop$', out['title'], re.I):
             out['state'], out['why'] = 'invalid', 'Inventory heading instead of an item title'
             return out
+    out['asking_price'] = market_listing_price.read(url, html)
     # The page was readable: remember its photos for a candidate the
     # model gave no image for (the list thumbnail, and Buy's copy).
     try:
@@ -17861,7 +17848,7 @@ def _market_listing_state(url):
 
 _MARKET_LAST_PROBE = threading.local()
 
-def _market_verify_live(items, workers=6):
+def _market_verify_live(items, workers=6, db=None):
     """Fetch every candidate's page in parallel; drop the ones the venue
     itself says are over; mark the ones it says are live. eBay requires
     a live verdict from the exact page. Model/search claims cannot
@@ -17895,6 +17882,7 @@ def _market_verify_live(items, workers=6):
             if issue_problem:
                 _market_drop(item, issue_problem)
                 continue
+        _market_apply_listing_price(item, pr, db)
         item['verified'] = (state == 'live')
         if pr.get('images'):
             photos = _market_listing_photos(item.get('listing_url'), item.get('image_urls'), pr['images'])
@@ -19039,7 +19027,7 @@ def _run_market_scan(category, scan_id, ebay_request_id=None, skip_ebay=False):
                     if item:
                         batch.append(item)
                 before = len(batch)
-                batch = _market_verify_live(batch)
+                batch = _market_verify_live(batch, db=conn)
                 if category == 'banknotes':
                     for item in batch:
                         item['owned'] = _market_owned_match(conn, category, item)
@@ -20002,6 +19990,13 @@ def _market_action_problem(db, row, item, already_paid=False, *, allow_unverifie
                     return ''
                 return 'Current eBay availability could not be verified. Try again later.'
         if not problem:
+            if row['status'] in ('new', 'superseded') and _market_apply_listing_price(item, probe, db):
+                # Repair saved recommendations during their existing exact-item
+                # probe. Never revive a Delete or rewrite a purchased record.
+                db.execute("UPDATE market_scan_items SET price=?, price_usd=?, payload=? "
+                           "WHERE id=? AND status IN ('new','superseded') AND payload=?",
+                           [item['price'], item['price_usd'], json.dumps(item), row['id'], row['payload']])
+                db.commit()
             item['_checkout_url'] = market_checkout.checkout_url(item['listing_url'], probe)
     if problem:
         item['unavailable_reason'] = problem

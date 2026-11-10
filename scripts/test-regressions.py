@@ -15,7 +15,7 @@ suites = [
     'test_banknote_price_currency.py', 'test_banknote_catalog_recovery.py',
     'test_banknote_catalog_fetch.py', 'test_banknote_catalog_search.py',
     'test_banknote_provider_recovery.py', 'test_banknote_catalog_lookup.py',
-    'test_market_purchase_capture.py', 'test_market_colonial.py', 'test_banknote_crop_responses.py',
+    'test_market_purchase_capture.py', 'test_market_colonial.py', 'test_market_listing_price.py', 'test_banknote_crop_responses.py',
     'test_banknote_image_quality.py', 'test_banknote_vision_source.py', 'test_banknote_check_preserves_images.py',
 ]
 env = dict(os.environ, EBAY_SYNC_WORKER='0', BANKNOTE_IMPORT_WORKER='0', ORIGINAL_LISTING_WORKER='0')

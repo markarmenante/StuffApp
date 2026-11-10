@@ -592,3 +592,21 @@ Tests: `test_market_ebay_buy.py`, `test_market_checkout.py`,
 `test_market_purchase_capture.py`, `test_market_personal_buy_browser.cjs`, and
 `test_market_purchase_capture_browser.cjs`. Browser tests use isolated fixtures
 and never submit a purchase.
+# Product asking prices (2026-11-10)
+
+The exact listing probe reads the primary Product/Offer's structured asking
+price (JSON-LD, scoped microdata, or page-head product metadata). An independently
+live fixed-price offer overrides a conflicting discovery price, including its
+currency and cents, before scan publication and before Buy. Shipping charges,
+shipping-value cutoffs, arbitrary currency amounts, related products, ambiguous
+offers and amounts without a stated currency cannot supply a product price.
+The existing probe is reused; price extraction adds no network request.
+
+View listing and Buy also persist that correction on saved new/superseded
+recommendations. The update guards the prior payload and status so a concurrent
+Delete or purchase wins. Bought and already Ordered records retain their
+purchase evidence; auction bids are not relabelled as fixed asking prices.
+Source URL, observation time and structured-price basis stay with the candidate.
+Regression: `tests/test_market_listing_price.py`, including the MA-Shops Japan
+5 yen offer whose $39.99 shipping-value cutoff was mistaken for its $249.99 ask.
+
