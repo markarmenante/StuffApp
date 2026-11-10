@@ -603,8 +603,9 @@ offers and amounts without a stated currency cannot supply a product price.
 The existing probe is reused; price extraction adds no network request.
 
 View listing and Buy also persist that correction on saved new/superseded
-recommendations. The update guards the prior payload and status so a concurrent
-Delete or purchase wins. Bought and already Ordered records retain their
+recommendations and dismissed Earlier history, without changing status or
+suppression. The update guards the prior payload and excludes Ordered records
+so a concurrent purchase wins. Bought and already Ordered records retain their
 purchase evidence; auction bids are not relabelled as fixed asking prices.
 Source URL, observation time and structured-price basis stay with the candidate.
 Regression: `tests/test_market_listing_price.py`, including the MA-Shops Japan

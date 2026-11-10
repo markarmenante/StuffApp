@@ -19990,11 +19990,11 @@ def _market_action_problem(db, row, item, already_paid=False, *, allow_unverifie
                     return ''
                 return 'Current eBay availability could not be verified. Try again later.'
         if not problem:
-            if row['status'] in ('new', 'superseded') and _market_apply_listing_price(item, probe, db):
+            if row['status'] in ('new', 'superseded', 'dismissed') and _market_apply_listing_price(item, probe, db):
                 # Repair saved recommendations during their existing exact-item
                 # probe. Never revive a Delete or rewrite a purchased record.
                 db.execute("UPDATE market_scan_items SET price=?, price_usd=?, payload=? "
-                           "WHERE id=? AND status IN ('new','superseded') AND payload=?",
+                           "WHERE id=? AND status IN ('new','superseded','dismissed') AND payload=?",
                            [item['price'], item['price_usd'], json.dumps(item), row['id'], row['payload']])
                 db.commit()
             item['_checkout_url'] = market_checkout.checkout_url(item['listing_url'], probe)

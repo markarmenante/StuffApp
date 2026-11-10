@@ -170,8 +170,8 @@ class SavedPriceTests(unittest.TestCase):
         self.assertEqual(saved['status'], 'superseded')
         self.assertEqual(self.db.execute('SELECT count(*) FROM banknotes').fetchone()[0], 0)
 
-    def test_paid_and_dismissed_history_not_rewritten(self):
-        for status in ('ordered', 'dismissed'):
+    def test_paid_history_not_rewritten(self):
+        for status in ('ordered',):
             self.db.execute('DELETE FROM market_scan_items')
             row = self.save(status)
             item = candidate()
@@ -180,6 +180,19 @@ class SavedPriceTests(unittest.TestCase):
             saved = self.db.execute("SELECT * FROM market_scan_items WHERE id='price-note'").fetchone()
             self.assertEqual(saved['price'], '$39.99')
             self.assertEqual(saved['status'], status)
+
+    def test_dismissed_price_refresh_keeps_suppression(self):
+        self.save()
+        stuff.market_runtime.dismiss_listing(self.db, 'banknotes', URL)
+        before = dict(self.db.execute('SELECT * FROM market_dismissals').fetchone())
+        with patch.object(stuff, '_market_fetch_page', return_value=(200, micro())):
+            result = stuff.app.test_client().get('/banknotes/market/price-note/listing')
+        self.assertEqual(result.status_code, 302)
+        saved = self.db.execute("SELECT * FROM market_scan_items WHERE id='price-note'").fetchone()
+        self.assertEqual(saved['price'], '$249.99')
+        self.assertEqual(saved['status'], 'dismissed')
+        self.assertEqual(dict(self.db.execute('SELECT * FROM market_dismissals').fetchone()), before)
+        self.assertEqual(stuff._market_items(self.db, 'banknotes'), [])
 
     def test_concurrent_delete_wins_over_price_refresh(self):
         row = self.save()
@@ -190,7 +203,8 @@ class SavedPriceTests(unittest.TestCase):
             stuff._market_action_problem(self.db, row, candidate())
         saved = self.db.execute("SELECT * FROM market_scan_items WHERE id='price-note'").fetchone()
         self.assertEqual(saved['status'], 'dismissed')
-        self.assertEqual(saved['price'], '$39.99')
+        self.assertEqual(saved['price'], '$249.99')
+        self.assertTrue(stuff.market_runtime.is_dismissed(self.db, 'banknotes', URL))
 
     def test_buy_files_the_verified_price_with_cents(self):
         self.save()
