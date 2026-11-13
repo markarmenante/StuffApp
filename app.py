@@ -22076,7 +22076,7 @@ def _queue_import_check(db,batch_id,item_id,revision):
 
 def _finish_single_import(db,batch_id):
     try:
-        return banknote_imports.finish_single(db,batch_id,UPLOAD_FOLDER,_create_released_banknote)
+        result = banknote_imports.finish_single(db,batch_id,UPLOAD_FOLDER,_create_released_banknote)
     except (banknote_imports.ImportProblem,OSError,sqlite3.Error):
         # A concurrent source/record change keeps the saved draft for review.
         # No partial publication or guessed duplicate may escape the transaction.
@@ -22087,6 +22087,8 @@ def _finish_single_import(db,batch_id):
                    ('This order changed before it could be added. Your saved item was kept; review it before continuing.',batch_id,account))
         db.commit()
         return None
+    _ensure_released_banknote_histories(db, result)
+    return result
 
 
 def _start_import_previews(batch_id,*,retry=False):
@@ -22385,6 +22387,20 @@ def banknote_import_refresh_existing(batch_id,item_id):
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 
 
+def _ensure_released_banknote_histories(db, result):
+    """Start research only after an import has committed; never reject a saved purchase."""
+    seen = set()
+    for item in (result or {}).get('released', []):
+        try:
+            row = db.execute('SELECT country FROM banknotes WHERE id=?', (item['record_id'],)).fetchone()
+            country = (row['country'] or '').strip() if row else ''
+            if country and country.lower() not in seen:
+                seen.add(country.lower())
+                ensure_country_history(country)
+        except Exception as exc:
+            app.logger.warning('History scheduling after import failed: %s', type(exc).__name__)
+
+
 def _create_released_banknote(db,fields,existing=None,*,image_overrides=()):
     columns=_table_cols(db,'banknotes')
     allowed={field['name'] for field in _import_fields()}|{'order_number','marketplace','image_1','image_2'}
@@ -22415,6 +22431,7 @@ def banknote_import_release(batch_id):
     require_owner();data=request.get_json(silent=True) or {}
     try:
         result=banknote_imports.release(get_db(),batch_id,data.get('items'),UPLOAD_FOLDER,_create_released_banknote)
+        _ensure_released_banknote_histories(get_db(), result)
         return jsonify(result)
     except banknote_imports.ImportProblem as exc:return jsonify(exc.payload()),409
 

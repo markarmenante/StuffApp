@@ -218,6 +218,30 @@ class HistoryCoverageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         ensure.assert_called_once_with('France')
 
+    def test_single_and_multi_note_imports_start_history_after_publication(self):
+        self.add()
+        self.add('second', 1793)
+        result = {'ok': True, 'released': [{'record_id': 'assignat'}, {'record_id': 'second'}]}
+        with patch.object(stuff.banknote_imports, 'finish_single', return_value=result), \
+                patch.object(stuff, 'ensure_country_history') as ensure:
+            self.assertEqual(stuff._finish_single_import(self.db, 'fixture'), result)
+        ensure.assert_called_once_with('France')
+        with patch.object(stuff.banknote_imports, 'release', return_value=result), \
+                patch.object(stuff, 'ensure_country_history') as ensure:
+            response = self.client.post('/banknotes/imports/fixture/release', json={'items': []})
+        self.assertEqual(response.status_code, 200, response.json)
+        ensure.assert_called_once_with('France')
+
+    def test_history_scheduler_failure_does_not_reject_a_completed_import(self):
+        self.add()
+        result = {'ok': True, 'released': [{'record_id': 'assignat'}]}
+        with patch.object(stuff.banknote_imports, 'release', return_value=result), \
+                patch.object(stuff, 'ensure_country_history', side_effect=sqlite3.OperationalError('busy')):
+            response = self.client.post('/banknotes/imports/fixture/release', json={'items': []})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['ok'])
+        self.assertEqual(self.records()['assignat']['date_1'], 1792)
+
     def test_list_checks_coverage_even_with_history_hidden(self):
         self.add()
         with patch.object(stuff, 'ensure_country_history') as ensure:

@@ -4,7 +4,8 @@ Every dated note must fit an actual history period. A note outside all bands
 never inherits the nearest period. Missing dates before, between or after the
 existing periods trigger background research on collection views (including
 History off), country/date/series/issuer edits, accepted Check changes and startup.
-New imports already enter through the same country-history hook.
+Single-note and multiple-note imports trigger the same check after publication
+commits. A history scheduling failure cannot reject a completed purchase.
 
 The check reads the collection's saved issue/series dates and canonical country
 aliases. It extends both built-in and previously generated histories. Existing
