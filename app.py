@@ -25,6 +25,7 @@ import market_purchase_capture
 import banknote_catalog
 import banknote_economics
 import banknote_history
+import banknote_lettering
 import coin_economics
 import precious_metals
 import banknote_catalog_lookup
@@ -1251,6 +1252,50 @@ def _merge_coin_condition_history(existing_notes, history_context):
     return f"{notes}\n\n{body}"
 
 
+def _backfill_banknote_translations(db):
+    """Repair the photographed P-87's blank companion field from its literal text."""
+    db.execute('''CREATE TABLE IF NOT EXISTS banknote_translation_repairs (
+        kind TEXT NOT NULL, record_id TEXT NOT NULL, lettering TEXT NOT NULL,
+        translation TEXT NOT NULL, applied_at TEXT NOT NULL,
+        PRIMARY KEY(kind, record_id))''')
+    changed = 0
+    candidates = [('record', dict(row)) for row in db.execute(
+        "SELECT * FROM banknotes WHERE COALESCE(TRIM(lettering_translation),'')='' AND COALESCE(TRIM(lettering),'')!=''")]
+    for row in db.execute("SELECT * FROM banknote_import_items WHERE state IN ('draft','blocked') AND check_state!='checking'"):
+        try:
+            fields = json.loads(row['fields_json'])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(fields, dict):
+            continue
+        if not str(fields.get('lettering_translation') or '').strip() and fields.get('lettering'):
+            candidates.append(('draft', dict(row, fields=fields)))
+    for kind, row in candidates:
+        fields = row.get('fields', row)
+        if (banknote_catalog.exact_year(fields.get('date_1')) != 1946
+                or banknote_catalog_lookup.references(fields) != {'pick:87'}
+                or not re.fullmatch(r'(?i)5\s+gulden', str(fields.get('denomination') or '').strip())
+                or db.execute('SELECT 1 FROM banknote_translation_repairs WHERE kind=? AND record_id=?', (kind, row['id'])).fetchone()):
+            continue
+        translation = banknote_lettering.known_translation(fields.get('lettering'))
+        if not translation:
+            continue
+        if kind == 'record':
+            updated = db.execute("UPDATE banknotes SET lettering_translation=? WHERE id=? AND lettering=? AND COALESCE(TRIM(lettering_translation),'')=''",
+                                 (translation, row['id'], fields['lettering']))
+        else:
+            fields['lettering_translation'] = translation
+            updated = db.execute("UPDATE banknote_import_items SET fields_json=?, revision=revision+1, updated_at=? WHERE id=? AND revision=? AND check_state!='checking' AND fields_json=?",
+                (json.dumps(fields, ensure_ascii=False), time.time(), row['id'], row['revision'], row['fields_json']))
+        if updated.rowcount:
+            db.execute('INSERT INTO banknote_translation_repairs VALUES (?,?,?,?,?)',
+                (kind, row['id'], fields['lettering'], translation, datetime.utcnow().isoformat()))
+            changed += 1
+    db.commit()
+    if changed:
+        app.logger.info('Banknote translation repair: corrected=%d', changed)
+
+
 def _backfill_english_banknote_lettering(db):
     """One-time split for English-text banknotes: Check historically put
     all inscriptions (Front: + Back:) in `lettering` and left the
@@ -1269,6 +1314,10 @@ def _backfill_english_banknote_lettering(db):
     }
 
     def looks_english(text):
+        # Dutch "bank" and "of" plus English panel annotations are not an
+        # English note. Do not move a foreign reverse into its translation field.
+        if re.search(r'(?i)\b(betaalt|toonder|vijf|gulden|membajar|roepiah|namaken|vervalschen)\b', text):
+            return False
         try:
             text.encode('ascii')
         except UnicodeEncodeError:
@@ -7195,6 +7244,7 @@ def init_db():
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)
     banknote_imports.init_schema(db)
+    _backfill_banknote_translations(db)
     market_unwatch.init_schema(db)
 
 
@@ -22022,7 +22072,9 @@ def _normalize_import_updates(updates):
 
 def _evaluate_import_check(note,prepared):
     error=None
-    try:suggestions=fetch_banknote_specs(note)
+    # Draft checks only fill blanks. Translate the saved left-hand text when
+    # it already exists, even if the model proposes a different transcription.
+    try:suggestions=fetch_banknote_specs(dict(note, _preserve_lettering=True))
     except Exception as exc:
         _log_banknote_check_error('import-identification', exc)
         suggestions={}
@@ -28436,6 +28488,50 @@ def _banknote_check_vision_images(note):
     return images
 
 
+def _complete_banknote_translation(note, result, client, model, deadline):
+    """Fill a missing companion translation within the existing Check deadline."""
+    result.pop('_translation_warning', None)
+    result.pop('_translation_not_needed', None)
+    accepted = set(result.get('_catalogue_direct_fields', []))
+    if str(_coin_row_value(note, 'lettering_translation') or '').strip():
+        return
+    saved = _coin_row_value(note, 'lettering')
+    preserve = dict(note).get('_preserve_lettering') and str(saved or '').strip()
+    if preserve and banknote_lettering.lines(result.get('lettering')) != banknote_lettering.lines(saved):
+        result.pop('lettering_translation', None)
+        accepted.discard('lettering_translation')
+        result['_catalogue_direct_fields'] = sorted(accepted)
+    if 'lettering_translation' in accepted and str(result.get('lettering_translation') or '').strip():
+        return
+    source = saved if preserve else result.get('lettering') if 'lettering' in accepted else saved
+    if not isinstance(source, str) or not source.strip():
+        return
+    translated = banknote_lettering.known_translation(source)
+    try:
+        if not translated:
+            if len(source) > 16000 or deadline - time.monotonic() < 3:
+                raise TimeoutError('No translation time remains')
+            response = _banknote_provider_create(client, stage='translation',
+                deadline=min(deadline, time.monotonic() + 20), model=model,
+                max_tokens=4096, messages=[{'role': 'user', 'content': banknote_lettering.prompt(source)}])
+            if getattr(response, 'stop_reason', None) not in ('end_turn', 'stop_sequence'):
+                raise ValueError('Translation did not finish')
+            output = banknote_lettering.validate(source, parse_model_json_object(_message_text(response)))
+            translated = output['lettering_translation']
+            if output['already_english']:
+                result['_translation_not_needed'] = True
+                if 'lettering' in accepted:
+                    result['lettering'] = output['lettering']
+        if translated:
+            result['lettering_translation'] = translated
+            accepted.add('lettering_translation')
+            result['_catalogue_direct_fields'] = sorted(accepted)
+        app.logger.info('Banknote translation completion: completed=%s', bool(translated) or bool(result.get('_translation_not_needed')))
+    except Exception as exc:
+        _log_banknote_check_error('translation', exc)
+        result['_translation_warning'] = 'The lettering was captured, but its English translation could not be completed. Retry Check.'
+
+
 def fetch_banknote_specs(note):
     """Fill missing identifying fields on a banknote via Claude vision +
     web search. Same contract as fetch_coin_specs: returns {field: value}
@@ -28620,7 +28716,11 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
         raise RuntimeError('Banknote spec lookup returned an invalid result')
     # Direct origin flags are checked against the text/images actually sent.
     # A model's ordinary top-level web guess cannot bypass the research gate.
-    result['_catalogue_direct_fields'] = banknote_catalog_lookup.direct_fields(result, dealer_text, bool(images))
+    result['_catalogue_direct_fields'] = banknote_catalog_lookup.direct_fields(
+        result, dealer_text, bool(images), saved_lettering=_coin_row_value(note, 'lettering'))
+    # Translation is a bounded text-only task on the captured lettering. Do it
+    # before optional catalogue follow-ups can consume the remaining deadline.
+    _complete_banknote_translation(note, result, client, lookup_model, deadline)
     # Retain the real first pass, overwriting any model-supplied private key.
     # A later empty/partial extraction must not erase already sourced facts.
     result['_catalogue_previous_research'] = result.get('catalogue_research')
@@ -28932,6 +29032,12 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
         for field in banknote_catalog_lookup.DIRECT_TYPE_FIELDS:
             if field not in direct_fields:
                 suggestions.pop(field, None)
+    # Exact captured text has a deterministic translation even if the provider
+    # omitted it or failed. No new inscription is inferred from the note type.
+    if not str(note.get('lettering_translation') or '').strip() and not suggestions.get('lettering_translation'):
+        translated = banknote_lettering.known_translation(suggestions.get('lettering') or note.get('lettering'))
+        if translated:
+            suggestions['lettering_translation'] = translated
     # The dealer's own description is canonical and needs no network —
     # overlay it last so it always wins.
     for field, value in _banknote_description_fields(note).items():
@@ -29306,6 +29412,12 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
                                           'new': new_description}
         else:
             filled['description'] = new_description
+
+    translation = filled.get('lettering_translation') or (overwritten.get('lettering_translation') or {}).get('new') or note.get('lettering_translation')
+    if not translation and suggestions.get('_translation_warning'):
+        warning = suggestions['_translation_warning']
+        prepared['warnings'].append(warning)
+        lookup_error = lookup_error or warning
 
     # Only stamp a fully successful run: a partial (description-only)
     # result keeps the Check button un-done so a retry isn't skipped.

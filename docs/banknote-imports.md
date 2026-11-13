@@ -343,6 +343,28 @@ Validation uses synthetic three-seller-order checkouts, exact cents against unre
 totals, membership and account failures, repeated import/release, revision conflicts,
 provider failure/retry, saved photos, blank-only partial-record recovery and accepted
 catalogue evidence. No real purchase or collection release is performed by tests.
+## Lettering and English translation
+
+Check treats English translation as a transformation of captured lettering,
+not a separate catalogue fact requiring the English words to appear verbatim on
+a foreign-language note. It inherits the verified inscription's source, or uses
+saved lettering. Other catalogue fields retain their existing evidence rules.
+
+If the main response omits the translation, a text-only pass translates the
+captured lines before optional catalogue follow-ups. This stays within Check's
+existing 75-second deadline, with at most 20 seconds for translation and no web
+tools. It must preserve every input line, side, amount and omission. A failed
+translation leaves Check partial and retains all captured text. Existing
+translations are preserved. Drafts translate their retained lettering when a
+new transcription is only an unapplied proposal.
+
+The 1946 Netherlands Indies 5 Gulden P-87 repair fills only blank translations
+whose entire saved transcription matches the recognized literal inscriptions.
+It preserves ellipses and explicitly marks untranscribed Javanese/Chinese panels
+as unavailable. It changes no purchase, identity, grading or photo fields, skips
+active checks and existing translations, increments repaired draft revisions,
+and records each repair in `banknote_translation_repairs`.
+
 ## Explicit country recovery
 
 Check and order-draft Check recover a blank country when an unambiguous listing

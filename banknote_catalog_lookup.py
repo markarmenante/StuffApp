@@ -258,11 +258,11 @@ def references(row):
             for key in [reference(part)] if key}
 
 
-def direct_fields(result, dealer_text, has_images):
+def direct_fields(result, dealer_text, has_images, saved_lettering=''):
     """Validate claimed direct origins against material actually supplied."""
     proofs = result.get('direct_evidence')
     if not isinstance(proofs, dict):
-        return []
+        proofs = {}
     accepted = []
     for field, proof in proofs.items():
         if field not in DIRECT_TYPE_FIELDS or not isinstance(proof, dict):
@@ -274,7 +274,13 @@ def direct_fields(result, dealer_text, has_images):
             accepted.append(field)
         elif proof.get('source') == 'dealer' and text(quote) in text(dealer_text) and contains(quote, result.get(field)):
             accepted.append(field)
-    return accepted
+    # English is derived from the captured original. It is not expected to
+    # appear verbatim in a foreign-language inscription or dealer quotation.
+    source = result.get('lettering') if 'lettering' in accepted else (
+        saved_lettering if not text(result.get('lettering')) or text(result['lettering']) == text(saved_lettering) else '')
+    if text(source) and isinstance(result.get('lettering_translation'), str) and result['lettering_translation'].strip():
+        accepted.append('lettering_translation')
+    return sorted(set(accepted))
 
 
 def reference_in(quote, key):
@@ -789,7 +795,10 @@ agree; state-series Criswell/Haxby references also require the issuing state.
 For every top-level type fact read directly, return direct_evidence mapping its
 field to {"source":"image|dealer", "quote":"literal text or observed image detail"}.
 The direct_evidence object in the response template is REQUIRED for every
-non-null direct type field, including issuer, design, lettering and translation.
+non-null direct type field, including issuer, design and lettering. Translation
+is derived from the verified lettering: return its English meaning even when
+those English words do not appear on the note or in a source. Do not require a
+separate web citation for a faithful translation of the captured inscription.
 Finish both sides' readable inscriptions and their translations, not just the
 holder label. An empty evidence map would discard those otherwise useful fields.
 Only use image when that evidence is visible in an actually attached image;
