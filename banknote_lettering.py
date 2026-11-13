@@ -49,14 +49,17 @@ _JAVASCHE = {key(original): translated for original, translated in _JAVASCHE.ite
 
 _BOLIVIA = {
     'EL BANCO DE LA NACION BOLIVIANA': 'The Bank of the Bolivian Nation',
+    'BANCO DE LA NACION BOLIVIANA': 'Bank of the Bolivian Nation',
     'PAGARÁ AL PORTADOR Á LA VISTA': 'Will pay the bearer on demand',
     'LA PAZ, 11 de Mayo de 1911': 'La Paz, May 11, 1911',
     'UN BOLIVIANO / EN MONEDA CORRIENTE': 'One boliviano / in current currency',
     'UN BOLIVIANO': 'One boliviano',
+    'UNO': 'One',
     'EN MONEDA CORRIENTE': 'In current currency',
     'SÉRIE Y2': 'Series Y2',
     'CONTADOR / DELEGADO DEL GOBIERNO': 'Accountant / Government delegate',
     'AMERICAN BANK NOTE COMPANY, NEW YORK': 'American Bank Note Company, New York',
+    'AMERICAN BANK NOTE CO. NEW YORK': 'American Bank Note Co., New York',
 }
 _BOLIVIA = {key(original): translated for original, translated in _BOLIVIA.items()}
 

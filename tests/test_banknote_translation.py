@@ -40,7 +40,11 @@ Front: PAGARÁ AL PORTADOR Á LA VISTA
 Front: LA PAZ, 11 de Mayo de 1911
 Front: UN BOLIVIANO / EN MONEDA CORRIENTE
 Front: SÉRIE Y2
-Front: CONTADOR / DELEGADO DEL GOBIERNO'''
+Front: CONTADOR / DELEGADO DEL GOBIERNO
+Front: American Bank Note Co. New York
+Back: BANCO DE LA NACION BOLIVIANA
+Back: UNO
+Back: American Bank Note Company, New York'''
 
 
 def response(data):
@@ -239,7 +243,8 @@ class TranslationTests(unittest.TestCase):
         translation = self.db.execute("SELECT lettering_translation FROM banknotes WHERE id='bolivia'").fetchone()[0]
         self.assertIn('La Paz, May 11, 1911', translation)
         self.assertIn('Accountant / Government delegate', translation)
-        self.assertEqual(len(translation.splitlines()), 6)
+        self.assertEqual(len(translation.splitlines()), 10)
+        self.assertIn('Back: Bank of the Bolivian Nation\nBack: One', translation)
         self.assertIsNone(lettering.known_translation(BOLIVIA + '\nBack: Unknown additional text'))
 
     def test_audit_counts_current_records_and_drafts_without_changing_them(self):
