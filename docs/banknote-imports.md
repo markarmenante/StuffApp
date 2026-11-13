@@ -358,12 +358,21 @@ translation leaves Check partial and retains all captured text. Existing
 translations are preserved. Drafts translate their retained lettering when a
 new transcription is only an unapplied proposal.
 
-The 1946 Netherlands Indies 5 Gulden P-87 repair fills only blank translations
+The 1946 Netherlands Indies 5 Gulden P-87 and 1911 Bolivia 1 Boliviano P-102b
+repairs fill only blank translations
 whose entire saved transcription matches the recognized literal inscriptions.
 It preserves ellipses and explicitly marks untranscribed Javanese/Chinese panels
 as unavailable. It changes no purchase, identity, grading or photo fields, skips
 active checks and existing translations, increments repaired draft revisions,
 and records each repair in `banknote_translation_repairs`.
+
+Startup also logs a read-only translation inventory before repairs, with saved
+records and unreleased drafts counted separately. Blank fields with captured
+lettering and identical source/translation text are candidates for review, not
+automatic declarations that an English-only note needs translation. Capped
+inscription excerpts support that review; purchase, account and photo data are
+excluded. Missing transcriptions, malformed drafts and active Checks have separate
+counts. Released draft copies are excluded.
 
 ## Explicit country recovery
 

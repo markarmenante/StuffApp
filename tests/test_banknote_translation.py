@@ -35,6 +35,12 @@ DIMOEKA HAKIM
 Back: Javanese-script legal panel (lower left)
 Back: Chinese-script legal panel (lower right)'''
 FRENCH = 'Front: CINQ FRANCS\nBack: PAYABLE AU PORTEUR'
+BOLIVIA = '''Front: EL BANCO DE LA NACION BOLIVIANA
+Front: PAGARÁ AL PORTADOR Á LA VISTA
+Front: LA PAZ, 11 de Mayo de 1911
+Front: UN BOLIVIANO / EN MONEDA CORRIENTE
+Front: SÉRIE Y2
+Front: CONTADOR / DELEGADO DEL GOBIERNO'''
 
 
 def response(data):
@@ -222,6 +228,49 @@ class TranslationTests(unittest.TestCase):
         active = self.db.execute("SELECT * FROM banknote_import_items WHERE id='active'").fetchone()
         self.assertEqual(active['revision'], 1)
         self.assertIsNone(json.loads(active['fields_json'])['lettering_translation'])
+
+    def test_bolivia_reported_text_is_translated_without_reconstructing_other_lines(self):
+        note = self.add('bolivia', country='Bolivia', denomination='1 Boliviano', date_1=1911,
+                        pick_number='P-102b', lettering=BOLIVIA)
+        result = stuff._banknote_check_result(note, self.prepared(), {}, db=self.db,
+                                              record_id='bolivia', source_record=note).json
+        self.assertIn('Will pay the bearer on demand', result['filled']['lettering_translation'])
+        stuff._backfill_banknote_translations(self.db)
+        translation = self.db.execute("SELECT lettering_translation FROM banknotes WHERE id='bolivia'").fetchone()[0]
+        self.assertIn('La Paz, May 11, 1911', translation)
+        self.assertIn('Accountant / Government delegate', translation)
+        self.assertEqual(len(translation.splitlines()), 6)
+        self.assertIsNone(lettering.known_translation(BOLIVIA + '\nBack: Unknown additional text'))
+
+    def test_audit_counts_current_records_and_drafts_without_changing_them(self):
+        self.add('foreign', lettering=FRENCH)
+        self.add('empty', lettering=' \n ')
+        self.add('translated', lettering_translation='Five guilders')
+        self.add('copied', lettering=FRENCH, lettering_translation=FRENCH)
+        self.add('english', lettering='Front: ONE POUND')
+        self.db.execute("INSERT INTO banknote_import_batches(id,account_name,order_id,created_at,updated_at) VALUES('b','fixture','order',1,1)")
+        for ident, state, check_state, fields in (
+                ('draft', 'draft', 'done', json.dumps(dict(lettering=BOLIVIA, price='$225'))),
+                ('checking', 'blocked', 'checking', json.dumps(dict(lettering=FRENCH))),
+                ('released', 'released', 'done', json.dumps(dict(lettering=FRENCH))),
+                ('discarded', 'discarded', 'done', json.dumps(dict(lettering=FRENCH))),
+                ('malformed', 'draft', 'idle', '[]')):
+            self.db.execute('''INSERT INTO banknote_import_items
+                (id,batch_id,account_name,line_key,item_id,source_json,source_digest,fields_json,state,check_state,created_at,updated_at)
+                VALUES (?,'b','fixture',?,?,'{}','fixture',?,?,?,1,1)''',
+                (ident, ident, ident, fields, state, check_state))
+        self.db.commit()
+        before = list(self.db.iterdump())
+        report = lettering.audit(self.db)
+        self.assertEqual(report['record'], dict(total=5, blank_with_lettering=2,
+            blank_without_lettering=1, translation_present=1, copied_lettering=1, checking=0, malformed=0))
+        self.assertEqual(report['draft']['total'], 2)
+        self.assertEqual(report['draft']['blank_with_lettering'], 2)
+        self.assertEqual(report['draft']['checking'], 1)
+        self.assertEqual(report['draft']['malformed'], 1)
+        self.assertEqual(len(report['candidates']), 5)
+        self.assertFalse(any('price' in entry or 'account_name' in entry for entry in report['candidates']))
+        self.assertEqual(before, list(self.db.iterdump()))
 
 
 if __name__ == '__main__':

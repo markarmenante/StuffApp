@@ -1253,7 +1253,7 @@ def _merge_coin_condition_history(existing_notes, history_context):
 
 
 def _backfill_banknote_translations(db):
-    """Repair the photographed P-87's blank companion field from its literal text."""
+    """Repair reported blank companion fields only from fully recognized text."""
     db.execute('''CREATE TABLE IF NOT EXISTS banknote_translation_repairs (
         kind TEXT NOT NULL, record_id TEXT NOT NULL, lettering TEXT NOT NULL,
         translation TEXT NOT NULL, applied_at TEXT NOT NULL,
@@ -1272,10 +1272,13 @@ def _backfill_banknote_translations(db):
             candidates.append(('draft', dict(row, fields=fields)))
     for kind, row in candidates:
         fields = row.get('fields', row)
-        if (banknote_catalog.exact_year(fields.get('date_1')) != 1946
-                or banknote_catalog_lookup.references(fields) != {'pick:87'}
-                or not re.fullmatch(r'(?i)5\s+gulden', str(fields.get('denomination') or '').strip())
-                or db.execute('SELECT 1 FROM banknote_translation_repairs WHERE kind=? AND record_id=?', (kind, row['id'])).fetchone()):
+        year = banknote_catalog.exact_year(fields.get('date_1'))
+        refs = banknote_catalog_lookup.references(fields)
+        denomination = str(fields.get('denomination') or '').strip()
+        reported_type = (
+            year == 1946 and refs == {'pick:87'} and re.fullmatch(r'(?i)5\s+gulden', denomination)
+            or year == 1911 and refs == {'pick:102b'} and re.fullmatch(r'(?i)1\s+boliviano', denomination))
+        if (not reported_type or db.execute('SELECT 1 FROM banknote_translation_repairs WHERE kind=? AND record_id=?', (kind, row['id'])).fetchone()):
             continue
         translation = banknote_lettering.known_translation(fields.get('lettering'))
         if not translation:
@@ -7244,6 +7247,11 @@ def init_db():
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)
     banknote_imports.init_schema(db)
+    translation_audit = banknote_lettering.audit(db)
+    app.logger.info('Banknote translation audit: %s', json.dumps(
+        {key: value for key, value in translation_audit.items() if key != 'candidates'}))
+    for candidate in translation_audit['candidates']:
+        app.logger.info('Banknote translation candidate: %s', json.dumps(candidate, ensure_ascii=False))
     _backfill_banknote_translations(db)
     market_unwatch.init_schema(db)
 

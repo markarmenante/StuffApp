@@ -47,13 +47,32 @@ _JAVASCHE = {
 _JAVASCHE = {key(original): translated for original, translated in _JAVASCHE.items()}
 
 
+_BOLIVIA = {
+    'EL BANCO DE LA NACION BOLIVIANA': 'The Bank of the Bolivian Nation',
+    'PAGARÁ AL PORTADOR Á LA VISTA': 'Will pay the bearer on demand',
+    'LA PAZ, 11 de Mayo de 1911': 'La Paz, May 11, 1911',
+    'UN BOLIVIANO / EN MONEDA CORRIENTE': 'One boliviano / in current currency',
+    'UN BOLIVIANO': 'One boliviano',
+    'EN MONEDA CORRIENTE': 'In current currency',
+    'SÉRIE Y2': 'Series Y2',
+    'CONTADOR / DELEGADO DEL GOBIERNO': 'Accountant / Government delegate',
+    'AMERICAN BANK NOTE COMPANY, NEW YORK': 'American Bank Note Company, New York',
+}
+_BOLIVIA = {key(original): translated for original, translated in _BOLIVIA.items()}
+
+
 def known_translation(value):
     inscriptions = lines(value)
-    if not any(key(text) == 'dejavaschebank' for _, text in inscriptions):
+    keys = {key(text) for _, text in inscriptions}
+    if 'dejavaschebank' in keys:
+        literal = _JAVASCHE
+    elif 'elbancodelanacionboliviana' in keys:
+        literal = _BOLIVIA
+    else:
         return None
     translated = []
     for side, text in inscriptions:
-        english = _JAVASCHE.get(key(text))
+        english = literal.get(key(text))
         if not english and re.fullmatch(r'\d{4}', text):
             english = text
         if not english and re.fullmatch(
@@ -66,6 +85,52 @@ def known_translation(value):
             return None
         translated.append(display(side, english))
     return '\n'.join(translated) or None
+
+
+def audit(db):
+    """Read-only inventory; blank panels are candidates, not a language verdict.
+
+    Include active drafts separately from saved records, without counting released
+    draft copies again. Excerpts allow human review of English-only front panels
+    and untranslated annotations. Never include purchases, accounts or photos.
+    """
+    import json
+    report = {'record': {}, 'draft': {}, 'candidates': []}
+    for kind in ('record', 'draft'):
+        report[kind] = dict(total=0, blank_with_lettering=0, blank_without_lettering=0,
+                            translation_present=0, copied_lettering=0, checking=0, malformed=0)
+    records = [('record', dict(row), {}) for row in db.execute(
+        'SELECT id,country,denomination,date_1,pick_number,lettering,lettering_translation FROM banknotes')]
+    for row in db.execute("SELECT id,fields_json,check_state,existing_record_id FROM banknote_import_items WHERE state IN ('draft','blocked') AND released_record_id IS NULL"):
+        try:
+            fields = json.loads(row['fields_json'])
+            if not isinstance(fields, dict):
+                raise ValueError('Invalid fields')
+        except (TypeError, ValueError):
+            report['draft']['malformed'] += 1
+            continue
+        records.append(('draft', dict(fields, id=row['id']), {
+            'checking': row['check_state'] == 'checking',
+            'existing_record_id': row['existing_record_id']}))
+    for kind, fields, extra in records:
+        counts = report[kind]
+        counts['total'] += 1
+        counts['checking'] += bool(extra.get('checking'))
+        original = str(fields.get('lettering') or '').strip()
+        translation = str(fields.get('lettering_translation') or '').strip()
+        reason = ('copied_lettering' if translation and original and
+                  translation.casefold() == original.casefold() else
+                  'translation_present' if translation else
+                  'blank_with_lettering' if original else 'blank_without_lettering')
+        counts[reason] += 1
+        if reason not in ('blank_with_lettering', 'copied_lettering'):
+            continue
+        candidate = {name: fields.get(name) for name in
+                     ('id', 'country', 'denomination', 'date_1', 'pick_number')}
+        candidate.update(kind=kind, reason=reason, lettering=original[:1800],
+                         truncated=len(original) > 1800, **extra)
+        report['candidates'].append(candidate)
+    return report
 
 
 def prompt(value):
