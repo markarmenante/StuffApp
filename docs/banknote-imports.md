@@ -343,3 +343,17 @@ Validation uses synthetic three-seller-order checkouts, exact cents against unre
 totals, membership and account failures, repeated import/release, revision conflicts,
 provider failure/retry, saved photos, blank-only partial-record recovery and accepted
 catalogue evidence. No real purchase or collection release is performed by tests.
+## Explicit country recovery
+
+Check and order-draft Check recover a blank country when an unambiguous listing
+heading names it, including a leading PMG/PCGS label. Historical territory names
+remain distinct. Currency alone, printer/shipping prose, ambiguous headings and
+existing country fields do not trigger this fallback. A conflicting model country
+remains unresolved with a warning. Provider failure does not discard this text fill.
+
+The one-time `banknote_assignat_country_v1` repair fills France only for blank-country
+records whose heading explicitly names France and whose saved issuer, 1792 date,
+10 Livres denomination and P-66b reference corroborate the reported assignat type.
+The original country and description remain in `banknote_country_recovery_history`.
+Only country, update timestamp and derived display positions change. The editor
+filters resolved missing-field warnings without rewriting the import audit.

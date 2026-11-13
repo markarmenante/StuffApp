@@ -725,6 +725,20 @@ def collection_check_warning(db,record):
                 return ''
         except (TypeError,ValueError):pass
     message=row['check_message']
+    # Display current missing fields while retaining the original Check audit.
+    # A manual correction or a guarded repair can resolve just one warning.
+    def unresolved_identity(match):
+        fields={'country':('country',),'denomination':('denomination',),
+                'catalogue number':('pick_number','other_catalog')}
+        labels=match.group(1).split(', ')
+        if any(label not in fields for label in labels):
+            return match.group(0)
+        missing=[label for label in labels if all(
+            banknote_catalog_lookup.is_blank(dict(record).get(field)) for field in fields[label])]
+        return ('Check could not confirm '+', '.join(missing)+
+                '. Review the listing and original photos or retry Check.') if missing else ''
+    message=re.sub(r'Check could not confirm ([^.]+)\. Review the listing and original photos or retry Check\.',
+                   unresolved_identity,message)
     # A later manual correction resolves crop-only warnings without erasing
     # the import audit or unrelated catalogue, price or side-selection warnings.
     crops=[]

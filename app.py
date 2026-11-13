@@ -5992,6 +5992,49 @@ def _migrate_banknote_country_aliases(db):
                        (canonical, datetime.utcnow().isoformat(), row['id']))
 
 
+def _migrate_assignat_country(db):
+    """Repair the reported blank France attribution, with an auditable type guard."""
+    key = 'banknote_assignat_country_v1'
+    if db.execute('SELECT 1 FROM migration_state WHERE key=?', (key,)).fetchone():
+        return
+    now = datetime.utcnow().isoformat()
+    changed = 0
+    db.execute('SAVEPOINT assignat_country_repair')
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS banknote_country_recovery_history (
+            banknote_id TEXT NOT NULL REFERENCES banknotes(id) ON DELETE CASCADE,
+            migration_key TEXT NOT NULL,
+            original_country TEXT,
+            country TEXT NOT NULL,
+            description TEXT NOT NULL,
+            recovered_at TEXT NOT NULL,
+            PRIMARY KEY (banknote_id, migration_key))''')
+        for record in db.execute("SELECT * FROM banknotes WHERE TRIM(COALESCE(country,''))=''").fetchall():
+            row = dict(record)
+            if (_banknote_description_country(row) != 'France'
+                    or banknote_catalog.fold(row.get('issuer')) not in
+                       ('domainesnationauxassignat', 'domainesnationaux')
+                    or banknote_catalog.fold(row.get('denomination')) != '10livres'
+                    or banknote_catalog.exact_year(row.get('date_1')) != 1792
+                    or banknote_catalog.fold(row.get('pick_number')) != 'p66b'):
+                continue
+            db.execute('INSERT INTO banknote_country_recovery_history VALUES (?,?,?,?,?,?)',
+                       (row['id'], key, row['country'], 'France', row['description'], now))
+            db.execute('UPDATE banknotes SET country=?, updated_at=? WHERE id=?',
+                       ('France', now, row['id']))
+            changed += 1
+        if changed:
+            _renumber_banknotes(db)
+        db.execute('INSERT INTO migration_state VALUES (?,?)', (key, now))
+        db.execute('RELEASE SAVEPOINT assignat_country_repair')
+        db.commit()
+    except Exception:
+        db.execute('ROLLBACK TO SAVEPOINT assignat_country_repair')
+        db.execute('RELEASE SAVEPOINT assignat_country_repair')
+        raise
+    app.logger.info('Banknote assignat country recovery: corrected=%s', changed)
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.create_function('BANKNOTE_GROUP', 4,
@@ -6485,6 +6528,7 @@ def init_db():
     db.execute("CREATE TABLE IF NOT EXISTS migration_state ("
                "key TEXT PRIMARY KEY, applied_at TEXT NOT NULL)")
     db.commit()
+    _migrate_assignat_country(db)
 
     # One-shot: when commit 1ebf6ed added the per-row _data.json
     # snapshot writer to the export, every row that already existed
@@ -28092,6 +28136,10 @@ def _banknote_description_fields(note):
     if not description.strip():
         return out
 
+    country = _banknote_description_country(note)
+    if country:
+        out['country'] = country
+
     # Pick catalogue number: "Pick-67", "P-67b", "Pick 102a", "P#67".
     m = re.search(r'\b(?:pick|p)\s*[-#]?\s*(\d{1,4}[a-z]?)\b',
                   description, re.IGNORECASE)
@@ -28213,6 +28261,34 @@ def _banknote_description_fields(note):
     if year:
         out['date_1'] = year
     return out
+
+
+def _banknote_description_country(note):
+    """Recover a blank country from an explicit, unambiguous listing heading.
+
+    Country mentions in shipping, printer prose or history are not identity.
+    Keep saved territorial filings, and never infer country from currency or
+    a bare catalogue reference. The shared roster preserves historical names.
+    """
+    if str(_coin_row_value(note, 'country') or '').strip():
+        return None
+    lines = str(_coin_row_value(note, 'description') or '').strip().splitlines()
+    title = lines[0].strip() if lines else ''
+    if not title or len(title) > 2000:
+        return None
+    identity = _market_title_identity({'title': title})
+    country = identity['country']
+    if not country or identity['ambiguous']:
+        return None
+    heading = re.sub(r'^\s*(?:issuing\s+)?country\s*:\s*', '', title, flags=re.I)
+    heading = re.sub(r'^\s*(?:' + _BANKNOTE_GRADER_ALIAS_RE + r')\b[\s:–—-]*'
+                     r'(?:\d{1,2}\b\s*(?:(?:EPQ|PPQ)\b\s*)?)?',
+                     '', heading, flags=re.I)
+    heading = re.sub(r'^(?:1[6-9]\d{2}|20\d{2})\s+', '', heading)
+    for spelling in banknote_catalog.country_spellings(country):
+        if re.match(re.escape(spelling) + r'(?!\w)', heading, re.I):
+            return country
+    return None
 
 
 def _banknote_check_vision_images(note):
@@ -28756,6 +28832,14 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
     # overlay it last so it always wins.
     for field, value in _banknote_description_fields(note).items():
         if value not in (None, ''):
+            if field == 'country':
+                proposed = _coerce_banknote_spec('country', suggestions.get('country'))
+                if proposed and banknote_catalog.fold(proposed) != banknote_catalog.fold(value):
+                    prepared['warnings'].append(
+                        'The listing country conflicts with the image/catalogue identification. '
+                        'Review the country before filling it.')
+                    suggestions.pop('country', None)
+                    continue
             suggestions[field] = value
 
     # An exact catalogue match supplies design details even when the model
