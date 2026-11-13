@@ -14,6 +14,7 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_detail_upload_ack.py', 'test_
          'test_banknote_photo_sides.py',
          'test_banknote_price_currency.py',
          'test_banknote_country_recovery.py',
+         'test_country_history_coverage.py',
          'test_banknote_status_badge.py',
          'test_purchase_lifecycle.py',
          'test_banknote_feedback.py',

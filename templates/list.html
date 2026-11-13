@@ -252,13 +252,14 @@
   {# A country whose history is still being generated (or failed to):
      the placeholder polls /banknotes/country-history/status and the
      page reloads itself when the panel is ready. #}
-  <div class="us-series-panel usp-pending" data-country="{{ _placement.pending.country }}" data-state="{{ _placement.pending.state }}">
+  <div class="us-series-panel usp-pending" data-country="{{ _placement.pending.country }}" data-state="{{ _placement.pending.state }}" data-year="{{ _placement.pending.year|default('') }}">
     <div class="usp-head">
       <span class="usp-class">{{ _placement.pending.country }}</span>
+      {% if _placement.pending.year %}<span class="usp-span">{{ _placement.pending.year }} · History does not cover this date yet.</span>{% endif %}
       {% if _placement.pending.state == 'pending' %}
       <span class="usp-span usp-pending-msg">History is being written — this page will refresh when it is ready.</span>
       {% else %}
-      <span class="usp-span usp-pending-msg">No history on file yet.</span>
+      <span class="usp-span usp-pending-msg">{{ 'The missing period needs research.' if _placement.pending.year else 'No history on file yet.' }}</span>
       <button type="button" class="usp-retry-btn">Write it now</button>
       {% endif %}
     </div>
@@ -1623,13 +1624,14 @@ window.shareCardRow = async function (ev, btn) {
 (function () {
   const pending = document.querySelectorAll('.usp-pending');
   if (!pending.length) return;
-  const statusUrl = (country) =>
-    '/banknotes/country-history/status?country=' + encodeURIComponent(country);
+  const statusUrl = (el) =>
+    '/banknotes/country-history/status?country=' + encodeURIComponent(el.dataset.country) +
+    (el.dataset.year ? '&year=' + encodeURIComponent(el.dataset.year) : '');
   let reloading = false;
   async function poll(el) {
     if (reloading) return;
     try {
-      const r = await fetch(statusUrl(el.dataset.country), {cache: 'no-store'});
+      const r = await fetch(statusUrl(el), {cache: 'no-store'});
       if (!r.ok) return;
       const d = await r.json();
       if (d.state === 'ready') {

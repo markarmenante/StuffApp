@@ -217,10 +217,10 @@ p = stuffapp._series_panel_for_row({'country': 'British Guiana', 'series': '', '
 assert p and p['title'] == 'British Guiana' and p['now'] == 'Guyana' \
     and 'West Indian dollar' in p['era']['label'], p
 
-# A year outside every band clamps to the nearest band instead of
-# dropping the panel (Malta's bands start at 1800; 1750 still panels).
+# A year outside every band waits for researched coverage; it must not
+# inherit a different period (Malta's bands start at 1800).
 p = stuffapp._series_panel_for_row({'country': 'Malta', 'series': '', 'date_1': 1750})
-assert p and p['era'] and p['era']['span'].startswith('1800'), p
+assert p is None, p
 # Colonial America stays strict: no clamping past 1783.
 assert stuffapp._series_panel_for_row(
     {'country': 'Pennsylvania Colony', 'series': '', 'date_1': 1872}) is None
