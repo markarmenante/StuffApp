@@ -355,7 +355,8 @@ Cochin-China, North/South Vietnam, British Honduras/Belize, Rhodesia/Rhodesia an
 Nyasaland, and historical versus successor currency areas are not merged.
 
 Other explicit spelling aliases include Rhodesia & Nyasaland → Rhodesia and
-Nyasaland; Saint Pierre & Miquelon → Saint Pierre and Miquelon; Sao Tome and
+Nyasaland; St. Helena / St Helena → Saint Helena; Saint Pierre & Miquelon →
+Saint Pierre and Miquelon; Sao Tome and
 Principe → São Tomé and Príncipe; Sarawak (Malaysia) → Sarawak; and
 Viet Nam - South (South Vietnam) → South Vietnam. Saved Timor names remain intact,
 but an exact pre-1975 year and Banco Nacional Ultramarino issuer resolve the display

@@ -158,7 +158,6 @@ class BanknoteEntityTests(unittest.TestCase):
             ('French India', 1936, 'french-french-india'),
             ('Hawaii', 1897, 'other-hawaii'),
             ('Alderney', 1810, 'british-alderney'),
-            ('St. Helena', 1976, 'british-saint-helena'),
             ('Faeroe Islands', 2001, 'danish-faroe-islands'),
         ):
             with self.subTest(country=country):
@@ -169,6 +168,17 @@ class BanknoteEntityTests(unittest.TestCase):
                 self.assertEqual(entity_for_row(row, old_classification)['key'], key)
                 self.assertEqual(row, before)
                 self.assertEqual(filing.row_classification(row), old_classification)
+
+    def test_saint_helena_spellings_share_one_british_entity(self):
+        for spelling in ('Saint Helena', 'St. Helena', 'St Helena'):
+            with self.subTest(spelling=spelling):
+                row = dict(country=spelling, date_1=1976)
+                before = dict(row)
+                classification = filing.row_classification(row)
+                self.assertEqual(classification['key'], 'british')
+                self.assertEqual(classification['country'], 'Saint Helena')
+                self.assertEqual(entity_for_row(row, classification)['key'], 'british-saint-helena')
+                self.assertEqual(row, before)
 
     def test_afars_spellings_share_one_french_entity_without_merging_djibouti(self):
         for spelling in ('French Afars & Issas', 'French Afars and Issas',

@@ -7242,6 +7242,26 @@ def init_db():
         db.execute('RELEASE SAVEPOINT banknote_display_number_v42')
         db.commit()
 
+    # v43: Saint Helena and St. Helena share one British country section.
+    # The alias migration above audits original spellings; reseed positions here.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v43',),
+    ).fetchone():
+        db.execute('SAVEPOINT banknote_display_number_v43')
+        try:
+            _renumber_banknotes(db)
+            db.execute(
+                "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+                ('banknote_display_number_v43', datetime.utcnow().isoformat()),
+            )
+        except Exception:
+            db.execute('ROLLBACK TO SAVEPOINT banknote_display_number_v43')
+            db.execute('RELEASE SAVEPOINT banknote_display_number_v43')
+            raise
+        db.execute('RELEASE SAVEPOINT banknote_display_number_v43')
+        db.commit()
+
     banknote_history.init_schema(db)
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)

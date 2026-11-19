@@ -71,6 +71,7 @@ ALIASES = {
         'Territoire français des Afars et des Issas'),
     'Rhodesia and Nyasaland': ('Rhodesia & Nyasaland',),
     'Trinidad and Tobago': ('Trinidad & Tobago',),
+    'Saint Helena': ('St. Helena', 'St Helena'),
     'Saint Pierre and Miquelon': ('Saint Pierre & Miquelon', 'St. Pierre and Miquelon'),
     'São Tomé and Príncipe': ('Sao Tome and Principe', 'São Tomé & Príncipe'),
     'Réunion': ('Reunion',),

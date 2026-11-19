@@ -1314,6 +1314,78 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='brasil-large'").fetchone()[0], 'Brazil')
         self.assertEqual(stuff._coerce_banknote_spec('country', ' BRASIL '), 'Brazil')
 
+    def test_saint_helena_aliases_share_filing_search_and_intake(self):
+        for spelling in ('Saint Helena', 'St. Helena', 'St Helena', ' ST. HELENA '):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(catalog.canonical_country(spelling), 'Saint Helena')
+                self.assertEqual(catalog.classify(spelling, 1976)['key'], 'british')
+                self.assertEqual(stuff.normalize_field_value('banknotes', 'country', spelling), 'Saint Helena')
+                self.assertEqual(stuff._coerce_banknote_spec('country', spelling), 'Saint Helena')
+                self.assertEqual(stuff._country_key(spelling), 'saint-helena')
+                row = dict(country=spelling, date_1=1976)
+                self.assertEqual(stuff.banknote_entities.entity_for_row(row)['key'], 'british-saint-helena')
+                for query in ('Saint Helena', 'St. Helena', 'St Helena'):
+                    self.assertIn(query, catalog.country_search(spelling))
+        for distinct in ('Ascension Island', 'Tristan da Cunha', 'Saint Helena and Ascension',
+                         'Saint Helena, Ascension and Tristan da Cunha'):
+            self.assertEqual(catalog.canonical_country(distinct), distinct)
+
+    def test_saint_helena_migration_unifies_heading_search_and_report(self):
+        fixtures = (
+            ('saint-small', 'Saint Helena', '1 Pound'),
+            ('st-large', 'St. Helena', '5 Pounds'),
+            ('st-undotted', 'St Helena', '10 Pounds'),
+        )
+        for ident, country, denomination in fixtures:
+            self.add(ident, country, 1976, 'Government of St. Helena')
+            self.db.execute('UPDATE banknotes SET denomination=? WHERE id=?', (denomination, ident))
+        self.db.execute("UPDATE banknotes SET banknote_id='P 999', price='$45.12', "
+                        "image_1='original-front.jpg', image_2='manual-back.jpg', notes='Keep my notes'")
+        self.db.execute("DELETE FROM migration_state WHERE key='banknote_display_number_v43'")
+        self.db.commit()
+        before = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        with patch.object(stuff, '_renumber_banknotes', wraps=stuff._renumber_banknotes) as renumber:
+            stuff.init_db()
+        self.assertEqual(renumber.call_count, 1)
+        after = {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')}
+        for ident, country, _ in fixtures:
+            self.assertEqual(after[ident]['country'], 'Saint Helena')
+            permitted = {'banknote_id'} if country == 'Saint Helena' else {'country', 'updated_at', 'banknote_id'}
+            self.assertEqual({key: value for key, value in before[ident].items() if key not in permitted},
+                             {key: value for key, value in after[ident].items() if key not in permitted})
+        audit = self.db.execute('SELECT banknote_id, original_country, canonical_country FROM '
+                                'banknote_country_alias_history ORDER BY banknote_id').fetchall()
+        self.assertEqual([tuple(row) for row in audit],
+                         [('st-large', 'St. Helena', 'Saint Helena'), ('st-undotted', 'St Helena', 'Saint Helena')])
+        ordered = self.db.execute('SELECT id, banknote_id FROM banknotes ORDER BY ' +
+                                  stuff.CATEGORY_ORDER_BY['banknotes']).fetchall()
+        self.assertEqual([tuple(row) for row in ordered],
+                         [('saint-small', 'P 001'), ('st-large', 'P 002'), ('st-undotted', 'P 003')])
+        with patch.object(stuff, '_renumber_banknotes') as renumber:
+            stuff.init_db()
+        renumber.assert_not_called()
+        self.assertEqual(after, {row['id']: dict(row) for row in self.db.execute('SELECT * FROM banknotes')})
+        self.assertEqual(self.db.execute('SELECT count(*) FROM banknote_country_alias_history').fetchone()[0], 2)
+        client = stuff.app.test_client()
+        with patch.dict(stuff.COUNTRY_ERAS, {'saint-helena': ('Saint Helena',
+                ((1976, 2026, 'Saint Helena pound', 'Synthetic history fixture.'),))}):
+            for query in ('Saint Helena', 'St. Helena', 'St Helena'):
+                sections = stuff._banknote_report_sections(self.db, {'q': query})
+                self.assertEqual([(section[0], [row['id'] for row in section[2]]) for section in sections],
+                                 [('Saint Helena', [fixture[0] for fixture in fixtures])])
+                for history in ('0', '1'):
+                    response = client.get('/banknotes', query_string={'q': query, 'history': history})
+                    self.assertEqual(response.status_code, 200)
+                    html = response.get_data(as_text=True)
+                    self.assertEqual(html.count('<span class="item-brand">Saint Helena</span>'), 3)
+                    if history == '1':
+                        self.assertEqual(html.count('<span class="usp-class">Saint Helena</span>'), 1)
+        response = client.post('/banknotes/st-large/save-field',
+                               json={'field': 'country', 'value': 'St. Helena'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.execute("SELECT country FROM banknotes WHERE id='st-large'").fetchone()[0],
+                         'Saint Helena')
+
     def test_aliases_do_not_merge_territories(self):
         for alias in ('Indochina', 'Indo China', 'Indo-China', 'French Indochina'):
             self.assertEqual(catalog.canonical_country(alias), 'French Indo-China')
