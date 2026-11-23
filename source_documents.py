@@ -10,6 +10,8 @@ from urllib.request import Request, build_opener
 from urllib.error import HTTPError
 import uuid
 
+import document_scan
+
 TABLES = {'coins': ('coin_source_archives', 'coin_id'),
           'banknotes': ('banknote_source_archives', 'banknote_id')}
 HOSTS = {'vcoins.com', 'www.vcoins.com', 'cngcoins.com', 'www.cngcoins.com',
@@ -187,7 +189,7 @@ def run_once(connect, upload_folder, fonts):
                         raise ValueError('Saved source is not PDF')
             else:
                 data, mime, final = fetch_bytes(row['url'], limit=12000000 if row['kind'] != 'listing' else 2000000)
-                if data.startswith(b'%PDF-') and mime in ('application/pdf','application/octet-stream'):
+                if document_scan.is_pdf(data, mime):
                     pdf = data
                 else:
                     html = data.decode('utf-8',errors='replace')

@@ -46,6 +46,46 @@ def vision_content(photos, folder):
     return content
 
 
+def conclusive(decision, photos):
+    """True only for a classification worth reusing for the same photographs.
+
+    Every supplied photo must have a well-formed HIGH-confidence reading, and
+    the decision must name distinct gallery photos as a verified front/back
+    pair of one complete note, with every complete-note view belonging to that
+    note. Anything less (uncertain, partial or malformed) is not reused, so
+    "run Check again" still asks the model afresh for uncertain sides."""
+    try:
+        ids = {photo['id'] for photo in photos}
+        gallery = {photo['id'] for photo in photos if photo.get('gallery')}
+        readings = {}
+        for item in decision['photos']:
+            ident = item['id']
+            if ident not in ids or ident in readings:
+                return False
+            if item.get('side') not in ('front', 'back', 'both', 'unknown') or item.get('confidence') != 'high':
+                return False
+            if type(item.get('same_note')) is not bool or type(item.get('complete_note')) is not bool:
+                return False
+            if not isinstance(item.get('reason'), str) or not item['reason'].strip():
+                return False
+            readings[ident] = item
+        if set(readings) != ids:
+            return False
+        front, back = decision.get('front'), decision.get('back')
+        if front not in gallery or back not in gallery or front == back:
+            return False
+        if decision.get('pair_verified') is not True or not str(decision.get('pair_reason') or '').strip():
+            return False
+        for ident, side in ((front, 'front'), (back, 'back')):
+            read = readings[ident]
+            if read['side'] != side or read['complete_note'] is not True or read['same_note'] is not True:
+                return False
+        return all(not read['complete_note'] or (read['same_note'] is True and read['side'] in ('front', 'back'))
+                   for read in readings.values())
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
 def select(assets, folder, classify, existing=None, resolve_original=None):
     """Return confidently selected candidates for empty slots only.
 

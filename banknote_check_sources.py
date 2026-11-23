@@ -8,6 +8,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+import document_scan
 import original_listings as listings
 import source_documents as archives
 import purchase_orders
@@ -18,28 +19,11 @@ import ebay_purchase_prices
 
 
 def pdf_text(path):
-    import pypdfium2 as pdfium
-    if path.stat().st_size > 12_000_000:
-        raise ValueError('PDF is too large for this check')
-    with pdfium.PdfDocument(str(path)) as pdf:
-        if len(pdf) > 30:
-            raise ValueError('PDF exceeds the 30-page check limit')
-        parts = []
-        for page in pdf:
-            try:
-                text = page.get_textpage()
-                try:
-                    parts.append(text.get_text_range())
-                finally:
-                    text.close()
-            finally:
-                page.close()
-        result = '\n'.join(parts).strip()
-        if len(result) > 60000:
-            raise ValueError('PDF text exceeds the check limit')
-        if len(result) < 40:
-            raise ValueError('PDF has no readable text; a text-readable invoice is needed')
-        return result
+    """Receipt/invoice text through the shared document scan service.
+
+    Kept here as the stable lookup point for Check and original-listing
+    comparisons (callers and tests resolve it from this module)."""
+    return document_scan.pdf_text(path)
 
 
 def ebay_receipt_unit_price(text, item):
@@ -281,22 +265,18 @@ def prepare(db, record, folder, fonts, category='banknotes', classify_photos=Non
                 data, mime, final = captured_html.encode(), 'text/html', url
             else:
                 data, mime, final = archives.fetch_bytes(url, limit=2_000_000 if kind == 'listing' else 12_000_000)
-            if data.startswith(b'%PDF-') and mime in ('application/pdf', 'application/octet-stream'):
+            if document_scan.is_pdf(data, mime):
                 # Keep image-only receipts too, but never claim their text was checked.
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.pdf') as temp:
-                    temp.write(data)
-                    temp.flush()
-                    try:
-                        text = pdf_text(Path(temp.name))
-                    except ValueError as error:
-                        if not str(error).startswith('PDF has no readable text'):
-                            raise
-                        filename = save_pdf(db, record_id, url, title, kind, data, folder, category)
-                        live_filenames.add(filename)
-                        reports.append(title + ': original PDF saved in Documents.')
-                        warnings.append(title + ': scanned PDF has no readable text; its fields are not verified.')
-                        continue
+                try:
+                    text = pdf_text(data)
+                except ValueError as error:
+                    if not str(error).startswith('PDF has no readable text'):
+                        raise
+                    filename = save_pdf(db, record_id, url, title, kind, data, folder, category)
+                    live_filenames.add(filename)
+                    reports.append(title + ': original PDF saved in Documents.')
+                    warnings.append(title + ': scanned PDF has no readable text; its fields are not verified.')
+                    continue
                 pdf = data
             elif kind == 'listing':
                 html = data.decode('utf-8', errors='replace')
