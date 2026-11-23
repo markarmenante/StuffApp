@@ -57,6 +57,11 @@ fold new standing instructions in here — nowhere else.)
   Keep the result pending until the account-bound browser confirms the item is
   no longer watched. Never replay old dismissals as unwatch commands or repeat
   an uncertain watch-toggle click. See `docs/market-scan.md`.
+- **Paid AI lookups are owner-only** (2026-11-23): every route that calls
+  Anthropic or Perplexity for a record (Check, lookups, value, history,
+  research, serial scan, pedigree) starts with `require_owner()`, and its
+  button is hidden or disabled for viewers. New paid routes follow the same
+  rule. See `docs/code-review-2026-11-23.md`.
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
 - **Shared connections and pathways** (2026-10-04): read this repo's
@@ -301,7 +306,13 @@ budget, at most four searches, one search pause continuation, and no automatic
 whole-Check retries. A temporary identification transport failure can retry once
 within that same deadline; the photo-side classifier has the same bounded recovery
 inside its 35-second budget. Invalid responses and authentication failures are not
-retried. See `docs/banknote-imports.md`. The follow-up selects actual observed public source URLs;
+retried; neither are timeouts or statuses outside the shared policy (429, 529,
+500/502/503 and connection failures without a response). See `docs/banknote-imports.md`.
+`BANKNOTE_CHECK_PROMPT_CACHE=1` (off by default) sends Check's fixed
+instructions as a cache_control system block cut from the same prompt, with each
+note's photos and text after it, so multi-note orders read them from the prompt
+cache. Turn it on only after a supervised A/B; see
+`tests/test_banknote_check_prompt_cache.py`. The follow-up selects actual observed public source URLs;
 up to four provider-hosted fetches (12k tokens each, failed calls count) read catalogue or auction
 pages from an explicit domain allowlist when search snippets truncate.
 If the instance already has `PERPLEXITY_API_KEY`, `banknote_catalog_search.py`
@@ -506,6 +517,23 @@ lockout or a failed deploy:
     (retry contract).
   - Add new paid call kinds to `enrichment.KINDS`. Owner report:
     `GET /admin/ai-usage`.
+- Shared retry policy (2026-11-23; was the deferred "Anthropic retry loop").
+  - SDK retries are off (`max_retries=0` by default in
+    `enrichment.anthropic_client`).
+  - `enrichment.retryable` retries only failures that cannot double-bill:
+    a connection failure with no response, 429, 529, 500/502/503. Never a
+    timeout, any other status, or a completed response.
+  - Every former app loop goes through `enrichment.call_with_retries`
+    (bounded backoff) via `_lookup_with_retries`, keeping each site's
+    exhaustion message. Paths with no loop of their own use
+    `anthropic_client(..., retries=2)`.
+  - Banknote Check keeps one transport retry inside its deadline.
+  - Tests: `tests/test_retry_policy.py`, `tests/test_enrichment.py`.
+- Model settings: `ANTHROPIC_TRIM_MODEL` (crop geometry/verdict) and
+  `ANTHROPIC_PHOTO_SIDES_MODEL` (front/back sorting) override the shared
+  `ANTHROPIC_NOTE_QUAD_MODEL`. Before switching any of them, or
+  `PERPLEXITY_WATCH_LOOKUP_SEARCH_CONTEXT`, to a cheaper value, run
+  `scripts/ab-cheaper-models.py` (sample inputs only, hard cap 40 calls).
 
 ## Deferred refactors (still open)
 
@@ -516,8 +544,6 @@ lockout or a failed deploy:
   slip maps values to the wrong medical columns silently.
   `tests/test_person_medications.py` pins the current round-trip and is
   the gate for that merge — do it, keep those tests green.
-- Anthropic retry loop (~110): three different exhaustion semantics;
-  unifying changes behavior.
 - coin `_coerce` twins (~53): genuinely divergent (die_axis /
   denomination handling) — a merge is a behavior change, not a refactor.
 - import-secret guard → decorator (48 copies): it's the admin-secret

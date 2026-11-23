@@ -49,9 +49,10 @@ measurements use a synthetic database with every provider stubbed.
    24 images per call and runs from record Check, draft Check, market Buy and
    restart recovery. Now cached by content hash for 30 days, **conclusive
    decisions only**, so "run Check again" still re-asks for uncertain sides.
-6. **[verified, left for Mark] Retries that can re-bill a request the
-   provider already processed** (see "Retries" below). This is the deferred
-   "Anthropic retry loop" item; changing it changes failure semantics.
+6. **[verified, fixed in the follow-up pass] Retries that could re-bill a
+   request the provider had already processed** (see "Retries" below).
+   Mark approved changing the deferred "Anthropic retry loop" item; one shared
+   policy now never repeats a timeout.
 
 ## Findings in detail
 
@@ -77,34 +78,67 @@ measurements use a synthetic database with every provider stubbed.
 | C4 | `_classify_banknote_listing_photos` (17581) | Same photographs classified again by record Check, draft Check, Buy, restart recovery. Up to 24 images + 5k output per call. | `enrichment.remember` (durable `ai_result_cache`) keyed by model, prompt, photo ids, sha256s and gallery roles; stores only `banknote_photo_sides.conclusive` decisions (every photo high-confidence, verified distinct front/back gallery pair, clean gallery). 30-day TTL. | **[verified] fixed**; test `test_conclusive_photo_sides_are_classified_once_uncertain_ones_again`. |
 | C5 | `fetch_banknote_specs` first turn (28694) | Two concurrent Checks of the same note (double submit, two tabs) paid twice. | `enrichment.single_flight` on the first identification turn. **No replay**: "normal Check retry" is a contract, so a later Check always asks again. | fixed. |
 | C6 | Page-view / startup triggers | Country histories: list view, saves, startup sweep. Bounded already (`banknote_history.claim`: 3 attempts per request, 60 s apart). State names and era maps were not bounded (C1, C2). Startup import recovery only re-dispatches idle/queued/interrupted checks; the label worker is cached and leased. | C1, C2. | checked. |
-| C7 | Prompt caching | Evaluated, **not applied**. The prompts put per-record content first (images, dealer text) and static rules after it, so there is no reusable prefix. Static blocks: photo sides 1.9k chars, slab labels 2.5k, country eras 2.4k, era map 1.8k (all below the cacheable minimum), banknote Check ~14.5k chars + ~5.6k per-note addendum (~4–5k tokens). Market Scan themes share context but run in parallel, so cache writes would race. A cache write costs more than plain input, so blanket caching would *raise* cost on one-off calls. | Recommendation only: move banknote Check's static rules into a `system` block with `cache_control` for multi-note orders. Estimated saving ~5–10% of a batched Check's input; it changes a contract-tested prompt layout, so it needs a supervised A/B. | left (needs Mark). |
-| C8 | Model choice | Photo sides, trim verdict/geometry (`ANTHROPIC_NOTE_QUAD_MODEL`), Check translation and serial scan use `auto-sonnet`; the coin image audit already uses Haiku. Watch specs and value use Perplexity sonar-pro with `search_context_size=high` (the most expensive context tier). | Recommendation: A/B `ANTHROPIC_NOTE_QUAD_MODEL=auto-haiku` with the existing trim A/B tool (`/banknote-trim-ab`); try `PERPLEXITY_WATCH_LOOKUP_SEARCH_CONTEXT=medium` for specs. Env-only changes, no code. | left (accuracy needs measuring). |
-| C9 | `_anthropic_create_uncached` (13989) | A turn stopped at `max_tokens` is re-run from scratch at 4× the budget, up to 32k (era map: 12k → 32k), re-billing the whole input and its searches. | Recommendation: allow one escalation only, or stream long generations. | left (deferred retry-semantics item). |
+| C7 | Prompt caching | Evaluated, **not applied**. The prompts put per-record content first (images, dealer text) and static rules after it, so there is no reusable prefix. Static blocks: photo sides 1.9k chars, slab labels 2.5k, country eras 2.4k, era map 1.8k (all below the cacheable minimum), banknote Check ~14.5k chars + ~5.6k per-note addendum (~4–5k tokens). Market Scan themes share context but run in parallel, so cache writes would race. A cache write costs more than plain input, so blanket caching would *raise* cost on one-off calls. | Follow-up: banknote Check's fixed instructions can go out as a `cache_control` system block cut from the same prompt, with each note's photos and text after it (`BANKNOTE_CHECK_PROMPT_CACHE=1`). Estimated saving ~5–10% of a batched Check's input. | **implemented, default off**: model-level equivalence could not be shown (no key in the sandbox); see Follow-up. |
+| C8 | Model choice | Photo sides, trim verdict/geometry (`ANTHROPIC_NOTE_QUAD_MODEL`), Check translation and serial scan use `auto-sonnet`; the coin image audit already uses Haiku. Watch specs and value use Perplexity sonar-pro with `search_context_size=high` (the most expensive context tier). | Follow-up: separate `ANTHROPIC_TRIM_MODEL` and `ANTHROPIC_PHOTO_SIDES_MODEL` settings (both fall back to `ANTHROPIC_NOTE_QUAD_MODEL`), plus `scripts/ab-cheaper-models.py`, a bounded A/B (≤40 calls, sample inputs only) that reports match/differ per item. | **not switched**: no Anthropic or Perplexity key in the sandbox, so there is no evidence yet; see Follow-up. |
+| C9 | `_anthropic_create_uncached` (13989) | A turn stopped at `max_tokens` is re-run from scratch at 4× the budget, up to 32k (era map: 12k → 32k), re-billing the whole input and its searches. | Recommendation: allow one escalation only, or stream long generations. | left: not a retry of a failed request (the first answer completed), so outside the follow-up's retry policy; needs Mark. |
 
-### Retries that can re-bill **[verified, left for Mark]**
+### Retries that could re-bill **[verified, fixed in the follow-up pass]**
 
 Anthropic Python SDK 2.13 (installed and read for this review) retries
 `APITimeoutError` by default (`DEFAULT_MAX_RETRIES = 2`). A timed-out web-search
 request may already have been processed, so each retry can be billed again.
+Before the follow-up:
 
 * Clients created **without `max_retries`** (default 2 retries, timeouts
   included): country history and state names (SDK default 600 s timeout),
   era map (1500 s), coin specs (240 s), art lookup (240 s), recording notes,
   coin history/context, collection analysis (600 s), watch value (Anthropic
-  path). With the app-level `for attempt in range(3)` loops on
-  `RateLimitError` this is up to 9 attempts for one click.
-* `_pedigree_model_call` (app.py:43143): `max_retries=1` plus two app-level
-  attempts on transient errors with a 480 s timeout, so up to 4 × 480 s.
-* Perplexity (`enrichment.perplexity_chat`): three attempts, retrying any
-  `URLError`, including a read timeout after 240 s.
+  path). With the app-level `for attempt in range(3)` loops this was up to
+  9 attempts for one click.
+* `_pedigree_model_call`: `max_retries=1` plus two app-level attempts on
+  transient errors (timeouts included) with a 480 s timeout, so up to
+  4 × 480 s.
+* Perplexity: three attempts on any `URLError`. Correction to the first
+  version of this review: a timeout while *waiting for the response* reaches
+  the caller as a bare `TimeoutError` and was already not retried. A timeout
+  while connecting or sending (`URLError(timeout)`) was retried.
 * Already correct: banknote Check (`max_retries=0`, one transport retry inside
   the 75 s budget, never on invalid responses) and Market Scan / estimates
   (`market_scan.model_call`, explicit budgets, no hidden retries).
 
-Recommendation: `max_retries=0` on web-search calls, plus one app-level retry
-only for connection failures, 429 and 5xx (not read timeouts). That is the
-banknote Check rule. It is the deferred "Anthropic retry loop" refactor, so
-this review documents it and leaves the semantics unchanged.
+After the follow-up there is one policy, in `enrichment`:
+
+* **What is retried** (`retryable`): a connection failure with no response
+  (never a timeout), 429, 529, 500/502/503. Nothing else is: no timeout, no
+  408/409/504, no other status, no invalid or completed response. A provider
+  `x-should-retry: false` vetoes the retry.
+* **How it waits** (`call_with_retries`): bounded backoff of base × attempt,
+  raised to a readable Retry-After and capped (30 s by default, 15 s for
+  coin research, serial scan and pedigree).
+* **SDK retries are off:** `anthropic_client` passes `max_retries=0` unless
+  a caller says otherwise.
+* **The nine app loops are gone.** They are now `_lookup_with_retries` calls:
+  watch value, coin context, coin history, recording notes, art, coin specs,
+  serial scan and pedigree, plus `_banknote_provider_create`. Each keeps its
+  attempt count and exhaustion message ("Rate limited after retries: …",
+  "Lookup failed after retries: …", or the friendly "… timed out" text);
+  errors a site never caught are re-raised unchanged.
+* **Paths that leaned on the SDK default** (country history, state names, era
+  map, collection analysis, coin image audit) use
+  `anthropic_client(..., retries=2)` under the same policy.
+* **Banknote Check** keeps one transport retry within its deadline, with
+  strict Retry-After and a 5 s reserve. 408 and 409 are no longer retried;
+  `tests/test_banknote_provider_recovery.py` was updated for exactly that.
+* **Perplexity** keeps three attempts and its two messages, and never
+  retries a timeout.
+* Coin research's configured attempts (default 1) are honoured, so it no
+  longer gets the SDK's two hidden retries.
+
+Tests per error class: `tests/test_enrichment.py` (`RetryPolicyTests`,
+Perplexity timeouts/overload/504) and `tests/test_retry_policy.py`. The latter
+covers art, coin specs, watch value, serial scan, pedigree and a background
+generation through the real call sites, including "a timeout makes exactly
+one paid call".
 
 ### Duplication across watches, coins, banknotes and art
 
@@ -135,9 +169,13 @@ this review documents it and leaves the semantics unchanged.
   But the explicit lookup POST routes (watch lookup/value/revalue, coin
   lookup/history/context, art lookup, recording notes, banknote serial scan,
   pedigree research) do not call `require_owner()`, so a non-owner *viewer*
-  with access to that category can trigger paid calls. Banknote Check, Market
-  Scan, analysis and the admin tools are owner-gated. Left for Mark
-  (permissions decision; adjacent to the open auth items).
+  with access to that category could trigger paid calls. Banknote Check, Market
+  Scan, analysis and the admin tools were owner-gated. **Fixed in the
+  follow-up:** those routes now start with the same `require_owner()` (the
+  same 403 for viewers), and the watch "Search Value" and pedigree "🔎
+  Research" buttons render disabled for viewers. The ✓ Check and Scan
+  buttons were already owner-only. `_resolve_user_email` and the open
+  security items are unchanged. Test: `tests/test_owner_paid_lookups.py`.
 * **No AI on PDFs.** No flow sends PDFs to a model; purchase evidence is the
   literal text layer, and image-only receipts are kept and reported
   unverified. This review keeps it that way.
@@ -163,7 +201,7 @@ because current list prices could not be re-checked during this review.
 | country-history | banknotes | list view, note save, startup sweep | `ANTHROPIC_COUNTRY_ERAS_MODEL` | web_search 3, 5000 out (×4 escalation to 32k) | durable claim, 3 attempts / 60 s | unchanged (already bounded); metered |
 | state-names | banknotes | list view, note save, startup sweep | `ANTHROPIC_COUNTRY_ERAS_MODEL` | web_search 2, 2000 out (escalation) | **none: every view/boot on failure** | durable backoff 1 h/6 h/24 h/7 d |
 | era-supplement | coins, banknotes | detail map view | `ANTHROPIC_ERA_MAP_MODEL` | web_search 3, 12000 out (→32k), 1500 s | **none: every view on failure** | durable backoff |
-| coin-specs | coins | explicit lookup; pedigree fill | `ANTHROPIC_COIN_LOOKUP_MODEL` or Perplexity | web_search 4, 2048 out, 240 s, ×3 loop + SDK retries | none | replay 10 min + single-flight; images ≤1568 px |
+| coin-specs | coins | explicit lookup; pedigree fill | `ANTHROPIC_COIN_LOOKUP_MODEL` or Perplexity | web_search 4, 2048 out, 240 s, ≤3 attempts (was ×3 loop + SDK retries; now shared policy, no timeout retry) | none | replay 10 min + single-flight; images ≤1568 px |
 | coin-history | coins | explicit lookup | `ANTHROPIC_COIN_RESEARCH_MODEL` | web_search 4, 900 out | none | replay + single-flight |
 | coin-context | coins | explicit lookup (job) | `ANTHROPIC_COIN_RESEARCH_MODEL` or Perplexity | web_search n, images | none | replay + single-flight |
 | coin-image-audit | coins | admin audit | Haiku 4.5 (fixed) | 2 images, 300 out | none | metered |
@@ -171,7 +209,7 @@ because current list prices could not be re-checked during this review.
 | watch-value | watches | explicit value; brand revaluation job | Perplexity sonar-pro high, or Anthropic web_search 5/10 | 1536–2048 out | none | replay for single value (not auction-first) |
 | art-lookup | art | explicit lookup | `ANTHROPIC_ART_LOOKUP_MODEL` | web_search 3, 1024 out, 240 s ×3 | none | replay + single-flight |
 | recording-notes | recordings | explicit lookup | `ANTHROPIC_RECORDING_MODEL` | web_search 4, 2000 out, ×3 | none | replay + single-flight |
-| pedigree | coins, banknotes | explicit research job | `ANTHROPIC_PEDIGREE_MODEL` | images, web_search budget, 4000 out, 480 s, retries ≤4 | none | images ≤1568 px; metered |
+| pedigree | coins, banknotes | explicit research job | `ANTHROPIC_PEDIGREE_MODEL` | images, web_search budget, 4000 out, 480 s, ≤2 attempts (was up to 4 incl. timeouts) | none | images ≤1568 px; metered |
 | original-listing-compare | all | original-listing worker | `ANTHROPIC_COIN_LOOKUP_MODEL` | text only (listing + receipts ≤90k chars), 4096 out, 60 s | worker-level | metered; receipt PDFs parsed once (memo) |
 | collection-analysis | all | explicit analysis | `ANTHROPIC_ANALYSIS_MODEL` | 9000 out, 600 s | none | metered |
 | market-scan | coins, banknotes | explicit Market Scan | `ANTHROPIC_MARKET_SCAN_MODEL` | per-scan request/search/output budgets | budgets | metered; alias resolution cached |
@@ -246,18 +284,57 @@ source originals, Market Scan rules, single/multi-note import.
     import `banknote_crop_jobs` when run directly (it adds no repo path).
 * After this change: all other `run_all.py` suites and all CI regression
   suites pass, as on main.
+* Follow-up pass adds `tests/test_retry_policy.py`,
+  `tests/test_owner_paid_lookups.py` and
+  `tests/test_banknote_check_prompt_cache.py`, extends
+  `tests/test_enrichment.py`, and updates
+  `tests/test_banknote_provider_recovery.py`. That last update is for the
+  intended policy change only: 408/409 moved from "retried" to "one call",
+  plus a timeout/504 case.
+
+## Follow-up pass (2026-11-23): the four items left for Mark
+
+Mark reconnected Railway and asked for all four items.
+
+1. **Retries.** Implemented as described in "Retries" above.
+2. **Cheaper models and the Perplexity watch setting.** *Not switched.* This
+   cloud sandbox carries neither `ANTHROPIC_API_KEY` nor `PERPLEXITY_API_KEY`
+   (contrary to CLAUDE.md's 2026-08-17 note about the Default environment),
+   so the bounded A/B could not run, and switching without evidence was
+   ruled out. No Railway variable was changed.
+   * New settings: `ANTHROPIC_TRIM_MODEL` (crop geometry/verdict) and
+     `ANTHROPIC_PHOTO_SIDES_MODEL` (front/back sorting), each falling back to
+     `ANTHROPIC_NOTE_QUAD_MODEL`, so each can switch alone.
+     `PERPLEXITY_WATCH_LOOKUP_SEARCH_CONTEXT` already existed.
+   * To decide, run `scripts/ab-cheaper-models.py` from a session with both
+     keys, on sample photos and 3–4 watch references (never production data;
+     the script copies inputs into a temporary data folder and stops at 40
+     paid calls). Switch only the areas it reports as matching on every item,
+     on both web and gerri.
+3. **Owner-only paid lookups.** Implemented (see Other observations).
+4. **Prompt caching for multi-note Check.** Implemented behind
+   `BANKNOTE_CHECK_PROMPT_CACHE=1`, default off. Equivalence of model output
+   could not be shown without a key.
+   * **How it works:** the system block is the exact instruction text of the
+     default prompt, with only "above/below" pointed at the user message. It
+     is cut from the default prompt at run time; any mismatch falls back to
+     the default layout.
+   * **What is proven without a key:** the default request is unchanged; the
+     cached block is identical for every note; per-note facts never enter
+     it; both layouts give identical Check results for the same model reply;
+     `cache_read_input_tokens` is metered (`/admin/ai-usage`).
+   * **Before turning it on:** run 2–3 fixture Checks with and without the
+     flag from a keyed sandbox.
+   * Test: `tests/test_banknote_check_prompt_cache.py`.
 
 ## Left deliberately, with reasons
 
-* **Retry semantics** (SDK timeout retries, Perplexity timeout retries,
-  pedigree 4×480 s, `max_tokens` escalation): the deferred "Anthropic retry
-  loop" item. Unifying them changes failure behavior; recommendation above.
-* **Prompt caching for banknote Check** (C7): needs a prompt-layout change on
-  a contract-tested prompt.
-* **Cheaper models for simple vision tasks, and Perplexity context size**
-  (C8): accuracy has to be measured first; env-only switches already exist.
-* **Viewer-triggered paid lookups:** a permissions decision near the open
-  auth items.
+* **`max_tokens` escalation** (C9): a completed answer re-run at 4× budget;
+  not a failed-request retry, so outside the approved policy.
+* **Switching to cheaper models or a cheaper Perplexity context** (C8): no
+  evidence yet; the A/B script and settings are ready.
+* **Turning on Check prompt caching** (C7): no evidence of equivalent model
+  output yet; the flag is ready.
 * **Trim verdict/geometry caching:** deterministic inputs, but the explicit
   "Crop photos" retry must be able to get a fresh answer.
 * **Banknote Check replay:** excluded by the "normal Check retry" contract;
