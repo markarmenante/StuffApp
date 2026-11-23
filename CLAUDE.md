@@ -491,6 +491,21 @@ lockout or a failed deploy:
   total_table) — each route's exact SQL is verbatim in that table.
 - `_table_cols`, `next_cat_id` shim, `_renumber_coin_groups` reuse,
   `_restore_docs_from_slots` (earlier pass).
+- Shared enrichment and document services (2026-11-23; see
+  `docs/code-review-2026-11-23.md`). Every Anthropic client comes from
+  `enrichment.anthropic_client(kind, …)` (metered per kind, kwargs passed
+  through unchanged). Perplexity chat goes through
+  `enrichment.perplexity_chat`. PDFs go through `document_scan`.
+  - Explicit lookups opt into `replay_kind=` (identical concurrent requests
+    share one call; identical successful ones replay for 10 min).
+  - Content-addressed sub-steps use `enrichment.remember` with an accept
+    predicate.
+  - Page-view and startup generations record failures with
+    `enrichment.record_failure` and check `cooldown_active`.
+  - Banknote Check identification is single-flight only, never replayed
+    (retry contract).
+  - Add new paid call kinds to `enrichment.KINDS`. Owner report:
+    `GET /admin/ai-usage`.
 
 ## Deferred refactors (still open)
 
