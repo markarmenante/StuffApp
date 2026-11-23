@@ -98,6 +98,22 @@ fold new standing instructions in here — nowhere else.)
     - **claude.ai chat sessions** carry no key. With the Mac's folder
       connected, stage that `.env`, keep only the key lines, and delete
       the staged copy.
+  - **Central key store: Doppler** (2026-11-23, Mark; workplace
+    "Armenante", free Developer plan).
+    - **Where the values live.** Project `shared`, config `prd` holds
+      `ANTHROPIC_API_KEY` and `PERPLEXITY_API_KEY`. Each app has its own
+      project (`stuffapp`, `family-office`, `meeting-room`,
+      `museum-of-time`, `n552ym`, `today`) whose `prd` references them
+      (`${shared.prd.ANTHROPIC_API_KEY}`).
+    - **How StuffApp gets them.** `stuffapp/prd` syncs to Railway
+      courageous-adventure production *shared* variables. web and gerri
+      read them as `${{shared.ANTHROPIC_API_KEY}}` and
+      `${{shared.PERPLEXITY_API_KEY}}`.
+    - **Changing a key.** Do it in Doppler `shared`, never on a Railway
+      service. A shared-variable change needs a redeploy of web and
+      gerri to take effect.
+    - **Other variables** (owner settings, DATA_DIR, tokens not yet
+      migrated) stay on the services.
   - A cloud session cannot READ those values: the Railway and Vercel
     MCP connectors return variable names only, and the Mac is reachable
     only when a local session appears in ListAgents. The claude.ai
