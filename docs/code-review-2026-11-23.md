@@ -327,14 +327,33 @@ Mark reconnected Railway and asked for all four items.
      flag from a keyed sandbox.
    * Test: `tests/test_banknote_check_prompt_cache.py`.
 
+### Keyed run (2026-11-23, later the same day)
+
+Mark copied the production keys into the Mac checkout's `.env` with
+`railway variables --kv`. The sandbox read only the two key lines from it. The
+sandbox can reach Anthropic but not Perplexity, so only the Anthropic items
+ran. Inputs were four sample photos in PMG holders: Mauritius 5 rupees
+front and back, Spain 25 pesetas 1928, and Peru 10 soles 1945. Everything ran
+in temporary data folders. In all, 28 paid calls; the cap was 40. **No setting
+was changed.**
+
+| Item | Current → candidate | Result | Decision |
+|---|---|---|---|
+| Trim geometry | claude-sonnet-5-5 → claude-haiku-5-5 | Holder and label flags were equal on 4/4 in two runs, and corners were within 8/1000. But Haiku returned axis-aligned rectangles where Sonnet reported the ~0.3° tilt of each holder. | **Not switched.** The precision loss is systematic, the sample was all near-straight photos, and the saving is a fraction of a cent per uploaded photo. |
+| Photo sides | claude-sonnet-5-5 → claude-haiku-5-5 | Run 1 differed. In run 2 the front/back picks, sides and confidence matched; Haiku's pairing note was weaker (no back serial). | **Not switched.** It was not consistent across runs. |
+| Watch lookup context | Perplexity high → medium | Not run: api.perplexity.ai is not reachable from the sandbox. | Unchanged. |
+| Check prompt cache | flag off → on, 2 notes each | Identity fields were identical: country, denomination, date, Pick (P-22, P-74b), grade and serial. Only free-text issuer and printer wording varied. The second note read the cached block (15.9k tokens). Each cached call also wrote a further ~13k tokens, so cost was +21% on the first note and −17% on the second, about even over two notes. | **Left off.** It costs more for a lone Check, which is the common case since single-note orders open directly. Revisit only if the extra cache writes are understood. |
+
 ## Left deliberately, with reasons
 
 * **`max_tokens` escalation** (C9): a completed answer re-run at 4× budget;
   not a failed-request retry, so outside the approved policy.
-* **Switching to cheaper models or a cheaper Perplexity context** (C8): no
-  evidence yet; the A/B script and settings are ready.
-* **Turning on Check prompt caching** (C7): no evidence of equivalent model
-  output yet; the flag is ready.
+* **Switching to cheaper models or a cheaper Perplexity context** (C8): the
+  keyed run above found no safe switch. Perplexity is still untested because
+  the sandbox can't reach it.
+* **Turning on Check prompt caching** (C7): the model output was equivalent,
+  but the cost was about even over two notes and higher for a single Check
+  (see the keyed run above). The flag stays off.
 * **Trim verdict/geometry caching:** deterministic inputs, but the explicit
   "Crop photos" retry must be able to get a fresh answer.
 * **Banknote Check replay:** excluded by the "normal Check retry" contract;

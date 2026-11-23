@@ -86,6 +86,18 @@ fold new standing instructions in here — nowhere else.)
   - The Anthropic and Perplexity model keys live in Railway project
     `courageous-adventure`, service `web`; the Anthropic key is also in
     the boardroom Vercel envs and the Mac checkout's `.env`.
+  - 2026-11-23 update:
+    - **Mac checkout `.env`.** The checkout is `~/GitHub/StuffApp`
+      (`~/Developer/*` are symlinks to it). Its `.env` was missing; Mark
+      refilled both keys from Railway with
+      `railway variables -s web -e production --kv`.
+    - **Dead or empty sources.** n552ym's local `.env`/`.env.prod`
+      Anthropic keys are revoked (401). The board Neon `app_config` table
+      has no `ANTHROPIC_API_KEY` row. Today's key resolver now gets its key
+      from this `.env`.
+    - **claude.ai chat sessions** carry no key. With the Mac's folder
+      connected, stage that `.env`, keep only the key lines, and delete
+      the staged copy.
   - A cloud session cannot READ those values: the Railway and Vercel
     MCP connectors return variable names only, and the Mac is reachable
     only when a local session appears in ListAgents. The claude.ai
