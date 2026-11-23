@@ -22,6 +22,7 @@ suites = [
     'test_market_purchase_capture.py', 'test_market_colonial.py', 'test_market_listing_price.py', 'test_banknote_crop_responses.py',
     'test_banknote_image_quality.py', 'test_banknote_vision_source.py', 'test_banknote_check_preserves_images.py',
     'test_enrichment.py', 'test_document_scan.py', 'test_paid_call_savings.py',
+    'test_retry_policy.py', 'test_owner_paid_lookups.py', 'test_banknote_check_prompt_cache.py',
 ]
 env = dict(os.environ, EBAY_SYNC_WORKER='0', BANKNOTE_IMPORT_WORKER='0', ORIGINAL_LISTING_WORKER='0')
 for key in ('ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'OPENAI_API_KEY'):

@@ -143,23 +143,160 @@ class _MeteredMessages:
         return getattr(self._client.messages, name)
 
 
-class MeteredClient:
-    """The SDK client with ``messages.create`` metered; everything else passes through."""
+class _RetryingMessages(_MeteredMessages):
+    def __init__(self, client, kind, retries):
+        super().__init__(client, kind)
+        self._retries = retries
 
-    def __init__(self, client, kind):
+    def create(self, **kwargs):
+        send = super().create
+        return call_with_retries(lambda: send(**kwargs), attempts=1 + self._retries)
+
+
+class MeteredClient:
+    """The SDK client with ``messages.create`` metered; everything else passes through.
+
+    ``retries`` (default 0) applies the shared retry policy to every create
+    call, for call paths without their own app-level retry. The SDK's own
+    retries are off (max_retries=0) so a timeout is never repeated."""
+
+    def __init__(self, client, kind, retries=0):
         self._client = client
         self.kind = kind
-        self.messages = _MeteredMessages(client, kind)
+        self.messages = _RetryingMessages(client, kind, retries) if retries else _MeteredMessages(client, kind)
 
     def __getattr__(self, name):
         return getattr(self._client, name)
 
 
-def anthropic_client(kind, **kwargs):
+def anthropic_client(kind, retries=0, **kwargs):
     """The one Anthropic client factory. kwargs go to ``anthropic.Anthropic``
-    unchanged (callers keep their own timeout and max_retries)."""
+    (callers keep their timeout). The SDK's automatic retries default to 0:
+    the SDK retries timeouts, and a timed-out request may already be billed.
+    ``retries`` adds app-level retries under the shared policy instead."""
     import anthropic
-    return MeteredClient(anthropic.Anthropic(**kwargs), kind)
+    kwargs.setdefault('max_retries', 0)
+    return MeteredClient(anthropic.Anthropic(**kwargs), kind, retries)
+
+
+# ── Retry policy ───────────────────────────────────────────────────────────
+# Retry only failures that were not billed or are safe to repeat: a
+# connection failure with no response (never a timeout), 429 rate limits,
+# 529 overloaded, and 500/502/503. A timeout or a completed response is
+# never repeated. One retry policy for every Anthropic and Perplexity call.
+RETRY_STATUSES = frozenset({429, 500, 502, 503, 529})
+
+
+def _status_of(error):
+    status = getattr(error, 'status_code', None)
+    if type(status) is not int:
+        status = getattr(error, 'code', None)   # urllib.error.HTTPError
+    return status if type(status) is int else None
+
+
+def _headers_of(error):
+    response = getattr(error, 'response', None)
+    headers = getattr(response, 'headers', None)
+    if headers is None:
+        headers = getattr(error, 'headers', None)   # urllib.error.HTTPError
+    return headers or {}
+
+
+def _is_timeout(error):
+    import socket
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return True
+    try:
+        import anthropic
+        if isinstance(error, anthropic.APITimeoutError):
+            return True
+    except ImportError:
+        pass
+    reason = getattr(error, 'reason', None)
+    return isinstance(reason, (TimeoutError, socket.timeout)) or 'timed out' in str(reason or '').lower()
+
+
+def retryable(error):
+    """True when repeating the request cannot double-bill: see RETRY_STATUSES."""
+    if error is None or _is_timeout(error):
+        return False
+    if str(_headers_of(error).get('x-should-retry', '')).lower() == 'false':
+        return False
+    status = _status_of(error)
+    if status is not None:
+        return status in RETRY_STATUSES
+    try:
+        import anthropic
+        if isinstance(error, anthropic.APIConnectionError):
+            return True    # no response arrived (timeouts excluded above)
+    except ImportError:
+        pass
+    import urllib.error
+    return isinstance(error, urllib.error.URLError)   # e.g. refused/DNS before a response
+
+
+def retry_after(error):
+    """Seconds the provider asked us to wait; None when absent; inf when unreadable."""
+    import math
+    headers = _headers_of(error)
+    try:
+        if headers.get('retry-after-ms') is not None:
+            value = float(headers.get('retry-after-ms')) / 1000
+        elif headers.get('retry-after') is not None:
+            value = float(headers.get('retry-after'))
+        else:
+            return None
+    except (TypeError, ValueError):
+        return float('inf')
+    return value if math.isfinite(value) and value >= 0 else float('inf')
+
+
+def backoff(error, attempt, base, cap, strict=False):
+    """Bounded wait before attempt ``attempt + 1``; None means do not retry.
+
+    Default: ``base * (attempt + 1)``, raised to a readable Retry-After, capped.
+    strict (banknote Check): the provider's Retry-After or ``base``; an
+    unreadable Retry-After vetoes the retry."""
+    requested = retry_after(error)
+    if strict:
+        if requested is not None and requested == float('inf'):
+            return None
+        wait = base if requested is None else requested
+    else:
+        wait = base * (attempt + 1)
+        if requested is not None and requested != float('inf'):
+            wait = max(wait, requested)
+    return min(wait, cap)
+
+
+def call_with_retries(send, *, attempts=2, give_up=None, base=10.0, cap=30.0, deadline=None,
+                      reserve=0.0, strict_retry_after=False, on_error=None, sleep=None, clock=None):
+    """Call ``send()`` up to ``attempts`` times under the shared policy.
+
+    A failure is retried only when ``retryable`` and attempts remain and the
+    bounded wait still leaves ``reserve`` seconds before ``deadline``.
+    Otherwise ``give_up(error)`` decides what the caller sees: an exception
+    to raise in its place (each call site keeps its historical message), or
+    None to re-raise the original error unchanged."""
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    for attempt in range(max(1, attempts)):
+        try:
+            return send()
+        except Exception as error:
+            wait = None
+            if attempt < attempts - 1 and retryable(error):
+                wait = backoff(error, attempt, base, cap, strict_retry_after)
+                if wait is not None and deadline is not None and deadline - clock() - wait < reserve:
+                    wait = None
+            if on_error is not None:
+                on_error(error, wait is not None)
+            if wait is None:
+                replacement = give_up(error) if give_up is not None else None
+                if replacement is None:
+                    raise
+                raise replacement from error
+            sleep(wait)
 
 
 # ── Request fingerprints ───────────────────────────────────────────────────
@@ -535,16 +672,17 @@ PERPLEXITY_CHAT_COMPLETIONS_URL = 'https://api.perplexity.ai/chat/completions'
 def perplexity_chat(api_key, body_data, kind, sleep=None):
     """POST one chat-completions body; returns ``(api_data, text)``.
 
-    Retry semantics are unchanged from the original app helper: three
-    attempts, waiting on 429/5xx (honouring Retry-After) and on transport
-    errors. See the review for the re-billing caveat on read timeouts.
-    Every attempt is metered as one request."""
+    Up to three attempts under the shared retry policy: 429, 529 and
+    500/502/503 (honouring Retry-After, bounded) and connection failures
+    before a response are retried; a timeout, any other status, or a
+    completed response is not. Failure messages are unchanged:
+    ``Perplexity HTTP <code>: <detail>`` for a rejected request, otherwise
+    ``Lookup failed after retries: <error>``. Every attempt is metered."""
     import urllib.error
     import urllib.request
-    sleep = sleep or time.sleep
     body = json.dumps(body_data).encode('utf-8')
-    last_err = None
-    for attempt in range(3):
+
+    def send():
         req = urllib.request.Request(
             PERPLEXITY_CHAT_COMPLETIONS_URL, data=body,
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json',
@@ -552,36 +690,29 @@ def perplexity_chat(api_key, body_data, kind, sleep=None):
             method='POST')
         try:
             with urllib.request.urlopen(req, timeout=240) as resp:
-                api_data = json.loads(resp.read().decode('utf-8'))
-            record_call(kind, 'perplexity', body_data.get('model'), api_data)
+                return json.loads(resp.read().decode('utf-8'))
+        except (urllib.error.URLError, OSError) as error:
+            record_call(kind, 'perplexity', body_data.get('model'), error=error)
+            raise
+
+    def give_up(error):
+        if isinstance(error, urllib.error.HTTPError) and error.code not in RETRY_STATUSES:
             try:
-                text = api_data['choices'][0]['message']['content'] or ''
-            except (KeyError, IndexError, TypeError):
-                raise RuntimeError(f'Unexpected Perplexity response: {str(api_data)[:200]}')
-            return api_data, text.strip()
-        except urllib.error.HTTPError as e:
-            last_err = e
-            record_call(kind, 'perplexity', body_data.get('model'), error=e)
-            if e.code == 429 or 500 <= e.code < 600:
-                wait = 10 * (attempt + 1)
-                try:
-                    ra = e.headers.get('retry-after') if getattr(e, 'headers', None) else None
-                    if ra:
-                        wait = max(wait, int(float(ra)))
-                except Exception:
-                    pass
-                sleep(wait)
-                continue
-            try:
-                detail = e.read().decode('utf-8', 'ignore')[:200]
+                detail = error.read().decode('utf-8', 'ignore')[:200]
             except Exception:
                 detail = ''
-            raise RuntimeError(f'Perplexity HTTP {e.code}: {detail}')
-        except urllib.error.URLError as e:
-            last_err = e
-            record_call(kind, 'perplexity', body_data.get('model'), error=e)
-            sleep(10 * (attempt + 1))
-    raise RuntimeError(f'Lookup failed after retries: {last_err}')
+            return RuntimeError(f'Perplexity HTTP {error.code}: {detail}')
+        if isinstance(error, urllib.error.URLError):
+            return RuntimeError(f'Lookup failed after retries: {error}')
+        return None   # a raw socket timeout surfaces as before
+
+    api_data = call_with_retries(send, attempts=3, give_up=give_up, base=10.0, cap=30.0, sleep=sleep)
+    record_call(kind, 'perplexity', body_data.get('model'), api_data)
+    try:
+        text = api_data['choices'][0]['message']['content'] or ''
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f'Unexpected Perplexity response: {str(api_data)[:200]}')
+    return api_data, text.strip()
 
 
 def anthropic_completed(response):

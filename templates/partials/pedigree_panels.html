@@ -12,6 +12,8 @@
 {%- set _ra_summary = (r['rarity_summary'] if r and 'rarity_summary' in r.keys() and r['rarity_summary'] else '') -%}
 {%- set _ra_searched = (r['rarity_searched_at'] if r and 'rarity_searched_at' in r.keys() and r['rarity_searched_at'] else '') -%}
 {%- set _noun = 'coin' if category == 'coins' else 'note' -%}
+{#- Research is a paid lookup: owner-only, like ✓ Check (2026-11-23). -#}
+{%- set _pdg_owner = g.current_user and g.current_user.role == 'owner' -%}
 
 <!-- Provenance & Pedigree — collapsible. Open by default for coins;
      collapsed by default for banknotes (Mark, 2026-09-18). -->
@@ -25,8 +27,8 @@
     <span class="pdg-spacer"></span>
     <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='provenance') }}" title="Every {{ _noun }}'s provenance on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
     <button type="button" class="toolbar-btn pill pdg-research {{ 'pill-fresh' if _pv_searched else 'pill-stale' }}" id="pdgProvResearch"
-            data-kind="provenance"
-            title="Trace this {{ _noun }} through the auction archives, dealer listings and named collections — by weight, dies, serial number and the photographs">🔎 Research</button>
+            data-kind="provenance"{% if not _pdg_owner %} disabled{% endif %}
+            title="{% if not _pdg_owner %}Only the owner can run research. {% endif %}Trace this {{ _noun }} through the auction archives, dealer listings and named collections — by weight, dies, serial number and the photographs">🔎 Research</button>
   </div>
   <div class="pdg-error" id="pdgProvError" style="display:none"></div>
   <table class="pdg-table" id="pdgEventsTable">
@@ -84,8 +86,8 @@
     {% endif %}
     <a class="pdg-link" href="{{ url_for('pedigree_overview', category=category, kind='rarity') }}" title="Every {{ _noun }}'s rarity standing on one page">All {{ 'coins' if category == 'coins' else 'notes' }} ›</a>
     <button type="button" class="toolbar-btn pill pdg-research {{ 'pill-fresh' if _ra_searched else 'pill-stale' }}" id="pdgRarResearch"
-            data-kind="rarity"
-            title="{% if category == 'banknotes' %}PMG / PCGS population for this Pick number and grade — total, at this grade, finer — plus the catalogue rarity{% else %}Specimens in the auction record, the reference's rarity rating, and where this coin sits in the die study{% endif %}">🔎 Research</button>
+            data-kind="rarity"{% if not _pdg_owner %} disabled{% endif %}
+            title="{% if not _pdg_owner %}Only the owner can run research. {% endif %}{% if category == 'banknotes' %}PMG / PCGS population for this Pick number and grade — total, at this grade, finer — plus the catalogue rarity{% else %}Specimens in the auction record, the reference's rarity rating, and where this coin sits in the die study{% endif %}">🔎 Research</button>
   </div>
   <div class="pdg-error" id="pdgRarError" style="display:none"></div>
   {%- set _slabbed = r and r['grading_authority'] and r['slab_number'] -%}

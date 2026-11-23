@@ -237,7 +237,7 @@ class MeteringTests(Base):
             cache_creation_input_tokens=0, server_tool_use=SimpleNamespace(web_search_requests=2))
         with patch('anthropic.Anthropic', return_value=inner) as factory:
             client = enrichment.anthropic_client('coin-specs', api_key='k', timeout=240.0)
-            factory.assert_called_once_with(api_key='k', timeout=240.0)
+            factory.assert_called_once_with(api_key='k', timeout=240.0, max_retries=0)
             client.messages.create(model='m', max_tokens=10, messages=[])
             client.close()
         inner.close.assert_called_once()
@@ -255,6 +255,109 @@ class MeteringTests(Base):
     def test_mock_usage_never_breaks_a_call(self):
         enrichment.record_call('x', 'anthropic', MagicMock(), MagicMock())
         self.assertEqual(enrichment.usage_snapshot()['x']['input_tokens'], 0)
+
+
+try:
+    import httpx2 as httpx
+except ImportError:   # older SDKs
+    import httpx
+import anthropic
+import socket
+
+REQUEST = httpx.Request('POST', 'https://api.anthropic.com/v1/messages')
+
+
+def status_error(status, headers=None):
+    return anthropic.APIStatusError('provider said no', body=None,
+                                    response=httpx.Response(status, headers=headers or {}, request=REQUEST))
+
+
+class RetryPolicyTests(Base):
+    def test_classifier_per_error_class(self):
+        cases = {
+            'connection refused before a response': (anthropic.APIConnectionError(request=REQUEST), True),
+            'SDK timeout': (anthropic.APITimeoutError(request=REQUEST), False),
+            'socket timeout': (TimeoutError('timed out'), False),
+            'urllib timeout before a response': (urllib.error.URLError(socket.timeout('timed out')), False),
+            'urllib connection refused': (urllib.error.URLError(ConnectionRefusedError()), True),
+            'invalid output': (ValueError('bad json'), False),
+        }
+        for status in (429, 500, 502, 503, 529):
+            cases[f'HTTP {status}'] = (status_error(status), True)
+            cases[f'Perplexity HTTP {status}'] = (urllib.error.HTTPError('u', status, 'x', {}, None), True)
+        for status in (400, 401, 403, 404, 408, 409, 413, 504):
+            cases[f'HTTP {status}'] = (status_error(status), False)
+            cases[f'Perplexity HTTP {status}'] = (urllib.error.HTTPError('u', status, 'x', {}, None), False)
+        cases['provider veto'] = (status_error(529, {'x-should-retry': 'false'}), False)
+        for label, (error, expected) in cases.items():
+            with self.subTest(label):
+                self.assertIs(enrichment.retryable(error), expected)
+
+    def metered(self, retries, *outcomes):
+        inner = MagicMock()
+        inner.messages.create.side_effect = list(outcomes)
+        return inner, enrichment.MeteredClient(inner, 'country-history', retries=retries)
+
+    def test_a_timeout_makes_exactly_one_paid_call(self):
+        inner, client = self.metered(2, anthropic.APITimeoutError(request=REQUEST), text_response('late'))
+        with patch('time.sleep') as sleep:
+            with self.assertRaises(anthropic.APITimeoutError):
+                client.messages.create(model='m', max_tokens=10, messages=[])
+        self.assertEqual(inner.messages.create.call_count, 1)
+        sleep.assert_not_called()
+        self.assertEqual(enrichment.usage_snapshot()['country-history']['calls'], 1)
+
+    def test_unbilled_failures_retry_with_bounded_backoff(self):
+        inner, client = self.metered(2, status_error(529, {'retry-after': '120'}),
+                                     anthropic.APIConnectionError(request=REQUEST), text_response('ok'))
+        with patch('time.sleep') as sleep:
+            result = client.messages.create(model='m', max_tokens=10, messages=[])
+        self.assertEqual(result.content[0].text, 'ok')
+        self.assertEqual(inner.messages.create.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [30.0, 20.0],
+                         'Retry-After is honoured but bounded; then base * attempt')
+
+    def test_completed_and_rejected_requests_are_not_repeated(self):
+        for error in (status_error(400), status_error(401), status_error(408), status_error(504), ValueError('x')):
+            with self.subTest(type(error).__name__, status=getattr(error, 'status_code', None)):
+                inner, client = self.metered(2, error)
+                with patch('time.sleep'):
+                    with self.assertRaises(type(error)):
+                        client.messages.create(model='m', max_tokens=10, messages=[])
+                self.assertEqual(inner.messages.create.call_count, 1)
+
+    def test_exhaustion_keeps_the_call_sites_result(self):
+        attempts = []
+
+        def send():
+            attempts.append(1)
+            raise status_error(503)
+        with patch('time.sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'Lookup failed after retries'):
+                enrichment.call_with_retries(send, attempts=3,
+                                             give_up=lambda e: RuntimeError(f'Lookup failed after retries: {e}'))
+        self.assertEqual(len(attempts), 3)
+        with self.assertRaises(anthropic.APITimeoutError):   # give_up may decline: original error re-raised
+            enrichment.call_with_retries(lambda: (_ for _ in ()).throw(anthropic.APITimeoutError(request=REQUEST)),
+                                         attempts=3, give_up=lambda e: None)
+
+    def test_deadline_and_strict_retry_after(self):
+        calls = []
+
+        def send():
+            calls.append(1)
+            raise status_error(429, {'retry-after': '8'})
+        with patch('time.sleep') as sleep:
+            with self.assertRaises(anthropic.APIStatusError):
+                enrichment.call_with_retries(send, attempts=2, base=1.0, cap=float('inf'), deadline=10.0,
+                                             reserve=5, strict_retry_after=True, clock=lambda: 0.0)
+        self.assertEqual((len(calls), sleep.call_count), (1, 0), '8 s wait would leave under 5 s')
+        calls.clear()
+        with patch('time.sleep') as sleep:
+            with self.assertRaises(anthropic.APIStatusError):
+                enrichment.call_with_retries(lambda: calls.append(1) or (_ for _ in ()).throw(
+                    status_error(429, {'retry-after': 'soon'})), attempts=2, strict_retry_after=True)
+        self.assertEqual(len(calls), 1, 'an unreadable Retry-After vetoes the strict retry')
 
 
 class ModelAliasTests(Base):
@@ -343,6 +446,30 @@ class PerplexityTransportTests(Base):
         with patch('urllib.request.urlopen', side_effect=[bad]) as opener:
             with self.assertRaisesRegex(RuntimeError, 'Perplexity HTTP 400'):
                 enrichment.perplexity_chat('key', self.BODY, 'watch-specs', sleep=lambda s: None)
+        self.assertEqual(opener.call_count, 1)
+
+    def test_timeouts_make_exactly_one_paid_call(self):
+        for error, raised in ((urllib.error.URLError(socket.timeout('timed out')), RuntimeError),
+                              (TimeoutError('The read operation timed out'), TimeoutError)):
+            with self.subTest(type(error).__name__):
+                answer = {'choices': [{'message': {'content': 'late'}}]}
+                with patch('urllib.request.urlopen', side_effect=[error, FakeHTTP(answer)]) as opener:
+                    with self.assertRaises(raised):
+                        enrichment.perplexity_chat('key', self.BODY, 'watch-specs', sleep=lambda s: None)
+                self.assertEqual(opener.call_count, 1)
+
+    def test_connection_failures_and_overload_retry_then_give_up_with_the_old_message(self):
+        refused = urllib.error.URLError(ConnectionRefusedError())
+        busy = urllib.error.HTTPError('u', 503, 'busy', {}, None)
+        waits = []
+        with patch('urllib.request.urlopen', side_effect=[refused, busy, busy]) as opener:
+            with self.assertRaisesRegex(RuntimeError, '^Lookup failed after retries'):
+                enrichment.perplexity_chat('key', self.BODY, 'watch-specs', sleep=waits.append)
+        self.assertEqual((opener.call_count, waits), (3, [10.0, 20.0]))
+        gateway = urllib.error.HTTPError('u', 504, 'gateway timeout', {}, io.BytesIO(b'upstream timed out'))
+        with patch('urllib.request.urlopen', side_effect=[gateway]) as opener:
+            with self.assertRaisesRegex(RuntimeError, 'Perplexity HTTP 504'):
+                enrichment.perplexity_chat('key', self.BODY, 'watch-specs', sleep=waits.append)
         self.assertEqual(opener.call_count, 1)
 
 

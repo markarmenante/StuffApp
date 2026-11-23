@@ -53,7 +53,9 @@ class RecoveryTests(unittest.TestCase):
             deadline=deadline, model='configured-model', messages=[], max_tokens=5000)
 
     def test_temporary_status_recovers_once_with_remaining_timeout(self):
-        for status in (408, 409, 429, 500, 503, 529):
+        # Shared retry policy (2026-11-23): only failures that cannot have been
+        # billed or are safe to repeat — 429, 529 and 500/502/503.
+        for status in (429, 500, 502, 503, 529):
             with self.subTest(status=status):
                 self.now = 100
                 self.client.reset_mock()
@@ -64,6 +66,19 @@ class RecoveryTests(unittest.TestCase):
                 self.assertEqual(self.client.messages.create.call_count, 2)
                 self.sleep.assert_called_once()
                 self.assertLess(self.client.messages.create.call_args.kwargs['timeout'], 35)
+
+    def test_timeouts_and_other_statuses_make_exactly_one_call(self):
+        for error in (anthropic.APITimeoutError(request=httpx.Request('POST', 'https://api.anthropic.com')),
+                      provider_error(408), provider_error(409), provider_error(504)):
+            with self.subTest(error=type(error).__name__, status=getattr(error, 'status_code', None)):
+                self.now = 100
+                self.client.reset_mock()
+                self.sleep.reset_mock()
+                self.client.messages.create.side_effect = [error, object()]
+                with self.assertRaises(type(error)):
+                    self.call()
+                self.assertEqual(self.client.messages.create.call_count, 1)
+                self.sleep.assert_not_called()
 
     def test_connection_error_retries_but_second_failure_stops(self):
         error = anthropic.APIConnectionError(request=httpx.Request('POST', 'https://api.anthropic.com'))

@@ -5121,7 +5121,7 @@ def generate_country_eras(country_name, years=(), existing=()):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
-    client = enrichment.anthropic_client('country-history', api_key=api_key)
+    client = enrichment.anthropic_client('country-history', retries=2, api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
     prompt = _COUNTRY_ERAS_PROMPT.format(
         name=country_name, current_year=datetime.utcnow().year)
@@ -5457,7 +5457,7 @@ def generate_state_names(country_name):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
-    client = enrichment.anthropic_client('state-names', api_key=api_key)
+    client = enrichment.anthropic_client('state-names', retries=2, api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
     prompt = _STATE_NAMES_PROMPT.format(
         name=country_name, current_year=datetime.utcnow().year)
@@ -12105,7 +12105,7 @@ def _vision_crop_verdict(crop, original=None):
     ])
     try:
         client = enrichment.anthropic_client('banknote-trim-verdict', api_key=api_key, timeout=30.0, max_retries=0)
-        model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        model = anthropic_lookup_model(api_key, ('ANTHROPIC_TRIM_MODEL', 'ANTHROPIC_NOTE_QUAD_MODEL'))
         resp = client.messages.create(
             model=model,
             # The current model can spend output tokens before its JSON answer.
@@ -12536,7 +12536,7 @@ def _note_geometry_scan(img):
         'is visible.')
     try:
         client = enrichment.anthropic_client('banknote-trim-geometry', api_key=api_key, timeout=30.0, max_retries=0)
-        model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+        model = anthropic_lookup_model(api_key, ('ANTHROPIC_TRIM_MODEL', 'ANTHROPIC_NOTE_QUAD_MODEL'))
         resp = client.messages.create(
             model=model,
             max_tokens=4096,
@@ -14170,31 +14170,17 @@ results_markdown rules:
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_WATCH_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(10 if auction_first else 5)
 
-    import time as _time
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind=None if auction_first else 'watch-value',
-                model=lookup_model,
-                max_tokens=1536,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
-            )
-            break
-        except anthropic.RateLimitError as e:
-            last_err = e
-            # honour Retry-After if present, else exponential backoff
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra: wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            _time.sleep(wait)
-    else:
-        raise RuntimeError(f'Rate limited after retries: {last_err}')
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind=None if auction_first else 'watch-value',
+            model=lookup_model,
+            max_tokens=1536,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': prompt}],
+        ),
+        attempts=3, catch=anthropic.RateLimitError,
+        message=lambda e: f'Rate limited after retries: {e}')
 
     # Concatenate all text blocks in the final assistant message
     text = _message_text(resp)
@@ -14432,6 +14418,7 @@ def watches_revalue():
     """Start an auction-first revaluation of every owned watch of a brand
     (form or JSON field `brand`, e.g. "Journe"). Values are overwritten;
     the previous value is kept at the head of each watch's results."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     payload = request.get_json(silent=True) or {}
     brand = (payload.get('brand') or request.form.get('brand') or request.args.get('brand') or '').strip()
     if not brand:
@@ -14784,7 +14771,7 @@ what the description says.
 
 Reply with ONLY a JSON object, no prose:
 {{"match": true|false, "confidence": 0.0, "reason": "one short sentence"}}"""})
-    client = enrichment.anthropic_client('coin-image-audit', api_key=api_key)
+    client = enrichment.anthropic_client('coin-image-audit', retries=2, api_key=api_key)
     resp = client.messages.create(
         model='claude-haiku-4-5-20251001',
         max_tokens=300,
@@ -14840,15 +14827,17 @@ def _coin_research_generation_settings():
     }
 
 
-def _bounded_retry_wait(err, fallback, cap=15):
-    wait = fallback
-    try:
-        ra = err.response.headers.get('retry-after') if getattr(err, 'response', None) else None
-        if ra:
-            wait = max(wait, int(float(ra)))
-    except Exception:
-        pass
-    return max(1, min(wait, cap))
+def _lookup_with_retries(send, *, attempts, catch, message, base=10.0, cap=30.0):
+    """The app-level retry for explicit lookups, under the shared policy
+    (enrichment.call_with_retries): at most ``attempts`` calls, retrying only
+    failures that cannot double-bill (no timeouts), with bounded backoff.
+
+    Exhaustion keeps each call site's historical result: an error of the
+    site's ``catch`` classes becomes ``RuntimeError(message(error))``; any
+    other error is re-raised unchanged."""
+    def give_up(error):
+        return RuntimeError(message(error)) if isinstance(error, catch) else None
+    return enrichment.call_with_retries(send, attempts=attempts, give_up=give_up, base=base, cap=cap)
 
 
 def _anthropic_transient_errs(anthropic):
@@ -15234,28 +15223,17 @@ def fetch_coin_context(coin):
     )
     web_search = anthropic_web_search_tool(
         search_count, default_tool='web_search_20260209')
-    import time as _time
-    last_err = None
-    transient_errs = _anthropic_transient_errs(anthropic)
-    for attempt in range(attempts):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind='coin-context',
-                model=lookup_model,
-                max_tokens=max_tokens,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': message_content}],
-            )
-            break
-        except transient_errs as e:
-            last_err = e
-            wait = _bounded_retry_wait(e, 8 * (attempt + 1))
-            if attempt == attempts - 1:
-                raise RuntimeError(_friendly_lookup_error('Coin research lookup', last_err))
-            _time.sleep(wait)
-    else:
-        raise RuntimeError(_friendly_lookup_error('Coin research lookup', last_err))
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind='coin-context',
+            model=lookup_model,
+            max_tokens=max_tokens,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': message_content}],
+        ),
+        attempts=attempts, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: _friendly_lookup_error('Coin research lookup', e), base=8.0, cap=15.0)
 
     text = _message_text(resp)
     text = text.strip()
@@ -15416,28 +15394,17 @@ Reply with ONLY a JSON object, no prose, no code fences:
     else:
         message_content = prompt
 
-    import time as _time
-    last_err = None
-    transient_errs = _anthropic_transient_errs(anthropic)
-    for attempt in range(attempts):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind='coin-history',
-                model=lookup_model,
-                max_tokens=900,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': message_content}],
-            )
-            break
-        except transient_errs as e:
-            last_err = e
-            wait = _bounded_retry_wait(e, 8 * (attempt + 1))
-            if attempt == attempts - 1:
-                raise RuntimeError(_friendly_lookup_error('Coin history lookup', last_err))
-            _time.sleep(wait)
-    else:
-        raise RuntimeError(_friendly_lookup_error('Coin history lookup', last_err))
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind='coin-history',
+            model=lookup_model,
+            max_tokens=900,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': message_content}],
+        ),
+        attempts=attempts, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: _friendly_lookup_error('Coin history lookup', e), base=8.0, cap=15.0)
 
     text = _message_text(resp)
     text = text.strip()
@@ -15748,30 +15715,17 @@ a <urls>…</urls> tag. No prose outside these tags, no code
 fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_block}{vinyl_pressing_block}"""
 
     client = enrichment.anthropic_client('recording-notes', api_key=api_key)
-    import time as _time
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind='recording-notes',
-                model=lookup_model,
-                max_tokens=2000,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
-            )
-            break
-        except anthropic.RateLimitError as e:
-            last_err = e
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra: wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            _time.sleep(wait)
-    else:
-        raise RuntimeError(f'Rate limited after retries: {last_err}')
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind='recording-notes',
+            model=lookup_model,
+            max_tokens=2000,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': prompt}],
+        ),
+        attempts=3, catch=anthropic.RateLimitError,
+        message=lambda e: f'Rate limited after retries: {e}')
 
     text = _message_text(resp)
     text = text.strip()
@@ -17524,40 +17478,30 @@ def _log_banknote_check_error(stage, error, *, retry=False):
         stage, type(error).__name__, status, origin, retry)
 
 
+class _BanknoteBudgetExhausted(TimeoutError):
+    """The caller's shared Check deadline has passed; no provider call is made."""
+
+
 def _banknote_provider_create(client, *, stage, deadline, **kwargs):
-    """One transport retry inside the caller's existing budget, never a new Check."""
-    import anthropic
-    import math
-    for attempt in range(2):
+    """One transport retry inside the caller's existing budget, never a new Check.
+
+    The shared policy (enrichment.retryable) decides what is transient: a
+    connection failure without a response, 429, 529 and 500/502/503. A timeout,
+    an invalid response or an authentication failure is never retried. The
+    provider's Retry-After (or 1 s) must leave 5 s of the deadline; an
+    unreadable Retry-After or x-should-retry: false vetoes the retry."""
+    def send():
         remaining = deadline - time.monotonic()
         if remaining < 1:
-            raise TimeoutError('Banknote Check provider budget exhausted')
-        try:
-            return client.messages.create(timeout=remaining, **kwargs)
-        except Exception as error:
-            status = getattr(error, 'status_code', None)
-            transient = (isinstance(error, anthropic.APIConnectionError) or
-                (isinstance(error, anthropic.APIStatusError) and type(status) is int
-                 and (status in (408, 409, 429) or 500 <= status < 600)))
-            response = getattr(error, 'response', None)
-            headers = response.headers if response is not None else {}
-            delay = 1.0
-            try:
-                if 'retry-after-ms' in headers:
-                    delay = float(headers['retry-after-ms']) / 1000
-                elif 'retry-after' in headers:
-                    delay = float(headers['retry-after'])
-                if not math.isfinite(delay) or delay < 0:
-                    delay = float('inf')
-            except (TypeError, ValueError):
-                # An unreadable server delay is not permission to retry early.
-                delay = float('inf')
-            retry = (attempt == 0 and transient and headers.get('x-should-retry') != 'false'
-                     and deadline - time.monotonic() - delay >= 5)
+            raise _BanknoteBudgetExhausted('Banknote Check provider budget exhausted')
+        return client.messages.create(timeout=remaining, **kwargs)
+
+    def log(error, retry):
+        if not isinstance(error, _BanknoteBudgetExhausted):
             _log_banknote_check_error(stage, error, retry=retry)
-            if not retry:
-                raise
-            time.sleep(delay)
+    return enrichment.call_with_retries(send, attempts=2, base=1.0, cap=float('inf'),
+                                        deadline=deadline, reserve=5, strict_retry_after=True,
+                                        on_error=log)
 
 
 _PHOTO_SIDES_CACHE_SECONDS = 30 * 86400
@@ -17588,7 +17532,7 @@ def _classify_banknote_listing_photos(photos):
     import anthropic
     content = banknote_photo_sides.vision_content(photos, UPLOAD_FOLDER)
     api_key = _require_anthropic_key()
-    model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
+    model = anthropic_lookup_model(api_key, ('ANTHROPIC_PHOTO_SIDES_MODEL', 'ANTHROPIC_NOTE_QUAD_MODEL'))
 
     def classify():
         client = enrichment.anthropic_client('banknote-photo-sides', api_key=api_key, timeout=35.0, max_retries=0)
@@ -21661,7 +21605,7 @@ def _run_collection_analysis(category, analysis_id):
             raise RuntimeError('anthropic package not installed')
         profile = _analysis_profile(db, category)
         prompt = _analysis_prompt(category, profile)
-        client = enrichment.anthropic_client('collection-analysis', api_key=api_key, timeout=600)
+        client = enrichment.anthropic_client('collection-analysis', retries=2, api_key=api_key, timeout=600)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_ANALYSIS_MODEL',
                                        default='auto-sonnet', fable_fallback='opus')
         resp = _anthropic_create(
@@ -24182,6 +24126,7 @@ def file_thumb(filename):
 @app.route('/watches/<record_id>/value', methods=['POST'])
 def watch_fetch_value(record_id):
     """Search the web for current market value of this watch and store it."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     watch = db.execute("SELECT * FROM watches WHERE id = ?", (record_id,)).fetchone()
     if not watch:
@@ -24290,6 +24235,7 @@ def _text_already_present(needle, haystack):
 @app.route('/watches/<record_id>/lookup', methods=['POST'])
 def watch_lookup_specs(record_id):
     """Use web search to fill in blank spec fields on a watch."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     watch = db.execute("SELECT * FROM watches WHERE id = ?", (record_id,)).fetchone()
     if not watch:
@@ -24640,32 +24586,17 @@ Reply with ONLY a JSON object, no prose, no code fences:
     client = enrichment.anthropic_client('art-lookup', api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_ART_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(3)
-    import time as _time
-    last_err = None
-    transient_errs = _anthropic_transient_errs(anthropic)
-    for attempt in range(3):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind='art-lookup',
-                model=lookup_model,
-                max_tokens=1024,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
-            )
-            break
-        except transient_errs as e:
-            last_err = e
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra:
-                    wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            _time.sleep(wait)
-    else:
-        raise RuntimeError(f'Lookup failed after retries: {last_err}')
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind='art-lookup',
+            model=lookup_model,
+            max_tokens=1024,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': prompt}],
+        ),
+        attempts=3, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: f'Lookup failed after retries: {e}')
 
     text = _message_text(resp)
     text = text.strip()
@@ -24689,6 +24620,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
 
 @app.route('/art/<record_id>/lookup', methods=['POST'])
 def art_lookup_bio(record_id):
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     art = db.execute("SELECT * FROM art WHERE id = ?", (record_id,)).fetchone()
     if not art:
@@ -26294,6 +26226,7 @@ def recording_fetch_notes(record_id):
     Claude + web_search. Returns {notes: str} on success. Does NOT
     write to the DB — the client appends to the existing notes
     textarea and the per-field autosave persists on blur."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     rec = db.execute(
         "SELECT * FROM recordings WHERE id = ?", (record_id,)
@@ -26669,7 +26602,7 @@ def generate_era_supplement(year, polity, place, lat, lng):
         import anthropic
     except ImportError:
         raise RuntimeError('anthropic package not installed.')
-    client = enrichment.anthropic_client('era-supplement', api_key=api_key)
+    client = enrichment.anthropic_client('era-supplement', retries=2, api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_ERA_MAP_MODEL')
     prompt = _ERA_SUPPLEMENT_PROMPT.format(
         year=int(year), year_label=_era_year_label(year),
@@ -26965,12 +26898,14 @@ def _start_coin_context_job(record_id, provider='claude'):
 def coin_fetch_context(record_id):
     """Combined historical-environment lookup using region + authority +
     mint + date + description together."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     return _start_coin_context_job(record_id, provider='claude')
 
 
 @app.route('/coins/<record_id>/context-perplexity', methods=['POST'])
 def coin_fetch_context_perplexity(record_id):
     """Perplexity-backed variant of the coin research lookup."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     return _start_coin_context_job(record_id, provider='perplexity')
 
 
@@ -27002,6 +26937,7 @@ def coin_context_job_status(record_id, job_id):
 @app.route('/coins/<record_id>/history', methods=['POST'])
 def coin_fetch_history(record_id):
     """AI history search for a coin's region or authority."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
     if not coin:
@@ -27551,33 +27487,17 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     client = enrichment.anthropic_client('coin-specs', api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
-    import time as _time
-    last_err = None
-    transient_errs = _anthropic_transient_errs(anthropic)
-    resp = None
-    for attempt in range(3):
-        try:
-            resp = _anthropic_create(
-                client,
-                replay_kind='coin-specs',
-                model=lookup_model,
-                max_tokens=2048,
-                tools=[web_search],
-                messages=[{'role': 'user', 'content': prompt}],
-            )
-            break
-        except transient_errs as e:
-            last_err = e
-            wait = 10 * (attempt + 1)
-            try:
-                ra = e.response.headers.get('retry-after') if getattr(e, 'response', None) else None
-                if ra:
-                    wait = max(wait, int(float(ra)))
-            except Exception:
-                pass
-            if attempt == 2:
-                raise RuntimeError(_friendly_lookup_error('Coin spec lookup', last_err))
-            _time.sleep(wait)
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            replay_kind='coin-specs',
+            model=lookup_model,
+            max_tokens=2048,
+            tools=[web_search],
+            messages=[{'role': 'user', 'content': prompt}],
+        ),
+        attempts=3, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: _friendly_lookup_error('Coin spec lookup', e))
     if resp is None:
         raise RuntimeError('Coin spec lookup returned no response')
 
@@ -27598,6 +27518,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
 @app.route('/coins/<record_id>/lookup-specs', methods=['POST'])
 def coin_lookup_specs(record_id):
     """Fill blank region/authority/denomination/metal/date fields from web."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     coin = db.execute("SELECT * FROM coins WHERE id = ?", (record_id,)).fetchone()
     if not coin:
@@ -28691,6 +28612,52 @@ def _complete_banknote_translation(note, result, client, model, deadline):
         result['_translation_warning'] = 'The lettering was captured, but its English translation could not be completed. Retry Check.'
 
 
+_BANKNOTE_CHECK_IMAGES_LINE = "1. The note's own images above (front/back, when attached)"
+_BANKNOTE_CHECK_DEALER_LINE = ("2. The selling dealer's own text below — authoritative for grading, "
+                               "attribution, and anything the images don't show.\n")
+
+
+def _banknote_check_prompt_cache_enabled():
+    """BANKNOTE_CHECK_PROMPT_CACHE=1 turns on the cacheable Check layout.
+    Off by default until a supervised A/B shows equivalent Check output."""
+    return (os.environ.get('BANKNOTE_CHECK_PROMPT_CACHE') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _banknote_check_cached_layout(base_prompt, dealer_text, known_lines, catalogue_prompt):
+    """Prompt-caching layout for Check: ``(system_blocks, per_note_text)`` or None.
+
+    The fixed instructions (source authority, rules, target fields, reply
+    format; about 4k tokens) move into one system block marked
+    cache_control, so the notes of a multi-note order read them from the
+    prompt cache instead of paying full input price each time. The note's
+    photos, dealer text, saved fields and catalogue research instructions
+    follow in the user message. The instruction text is cut from the very
+    prompt the default layout sends, with only "above"/"below" pointing at
+    the user message, so the two layouts cannot drift. Any mismatch returns
+    None and Check uses the default layout."""
+    head_end = base_prompt.find(_BANKNOTE_CHECK_DEALER_LINE)
+    if head_end < 0 or _BANKNOTE_CHECK_IMAGES_LINE not in base_prompt[:head_end]:
+        return None
+    head_end += len(_BANKNOTE_CHECK_DEALER_LINE)
+    middle = (dealer_text + '\n\nStructured fields the user has already transcribed from the dealer:\n'
+              + known_lines + '\n\n')
+    if base_prompt[head_end:head_end + len(middle)] != middle:
+        return None
+    rules = base_prompt[head_end + len(middle):]
+    head = (base_prompt[:head_end]
+            .replace(_BANKNOTE_CHECK_IMAGES_LINE,
+                     "1. The note's own images in the user message (front/back, when attached)", 1)
+            .replace("2. The selling dealer's own text below —",
+                     "2. The selling dealer's own text in the user message —", 1))
+    system = [{'type': 'text', 'text': head.rstrip('\n') + '\n\n' + rules,
+               'cache_control': {'type': 'ephemeral'}}]
+    per_note = ("THIS NOTE: the selling dealer's own text and the saved record "
+                "(the material the instructions refer to).\n" + dealer_text
+                + '\n\nStructured fields the user has already transcribed from the dealer:\n'
+                + known_lines + '\n' + catalogue_prompt)
+    return system, per_note
+
+
 def fetch_banknote_specs(note):
     """Fill missing identifying fields on a banknote via Claude vision +
     web search. Same contract as fetch_coin_specs: returns {field: value}
@@ -28813,7 +28780,11 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
   "sources": "one-line note of where each value came from (note images vs dealer text vs which web source); identify unverified fields and inaccessible sources"
 }}
 """
-    prompt += banknote_catalog_lookup.prompt(dict(note))
+    base_prompt = prompt
+    catalogue_prompt = banknote_catalog_lookup.prompt(dict(note))
+    prompt = base_prompt + catalogue_prompt
+    cached_layout = (_banknote_check_cached_layout(base_prompt, dealer_text, known_lines, catalogue_prompt)
+                     if _banknote_check_prompt_cache_enabled() else None)
 
     api_key = _require_anthropic_key()
     try:
@@ -28833,7 +28804,9 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
             'media_type': img['media_type'],
             'data': img['data'],
         }})
-    content.append({'type': 'text', 'text': prompt})
+    content.append({'type': 'text', 'text': cached_layout[1] if cached_layout else prompt})
+    # Cacheable layout only: the fixed instructions as a cache_control system block.
+    system_kwargs = {'system': cached_layout[0]} if cached_layout else {}
 
     # One shared vision/research budget; do not add a second slow web lookup
     # after the first response or retry a whole Check beyond the proxy budget.
@@ -28849,14 +28822,15 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
         try:
             def identify(messages=list(messages), search_tools=search_tools):
                 return _banknote_provider_create(client, stage='identification', deadline=deadline,
-                    model=lookup_model, max_tokens=8192, tools=search_tools, messages=messages)
+                    model=lookup_model, max_tokens=8192, tools=search_tools, messages=messages,
+                    **system_kwargs)
             if len(messages) == 1:
                 # Concurrent identical Checks (double submit, two tabs, the
                 # draft worker beside an explicit Check) share the first turn.
                 # No replay: an explicit retry always asks the model again.
                 resp = enrichment.single_flight(
                     enrichment.fingerprint('banknote-check', dict(model=lookup_model, tools=search_tools,
-                                                                   messages=messages)),
+                                                                   messages=messages, **system_kwargs)),
                     identify, 'banknote-check')
             else:
                 resp = identify()
@@ -29752,24 +29726,15 @@ def scan_banknote_serial(note):
         }})
     content.append({'type': 'text', 'text': _SERIAL_SCAN_PROMPT})
 
-    import time as _time
-    transient_errs = _anthropic_transient_errs(anthropic)
-    resp = None
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = _anthropic_create(
-                client,
-                model=lookup_model,
-                max_tokens=1024,
-                messages=[{'role': 'user', 'content': content}],
-            )
-            break
-        except transient_errs as e:
-            last_err = e
-            if attempt == 2:
-                raise RuntimeError(_friendly_lookup_error('Serial scan', last_err))
-            _time.sleep(5 * (attempt + 1))
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client,
+            model=lookup_model,
+            max_tokens=1024,
+            messages=[{'role': 'user', 'content': content}],
+        ),
+        attempts=3, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: _friendly_lookup_error('Serial scan', e), base=5.0, cap=15.0)
     if resp is None:
         raise RuntimeError('Serial scan returned no response')
 
@@ -29813,6 +29778,7 @@ def banknote_scan_serial(record_id):
     The value is written to the record when one is read (overwriting a
     different existing value — the photo is the note itself); the page
     shows the previous value alongside so a change is visible."""
+    require_owner()   # paid lookups are owner-only, like banknote Check
     db = get_db()
     note = db.execute("SELECT * FROM banknotes WHERE id = ?",
                       (record_id,)).fetchone()
@@ -43161,28 +43127,22 @@ def _pedigree_model_call(kind, category, prompt, images):
     else:
         content = prompt
     budget = _pedigree_search_budget(kind)
-    client = enrichment.anthropic_client('pedigree', api_key=api_key, timeout=480, max_retries=1)
+    # No SDK retries: a 480 s research turn that times out may already be
+    # billed, so it is never repeated (shared policy, 2026-11-23).
+    client = enrichment.anthropic_client('pedigree', api_key=api_key, timeout=480)
     model = anthropic_lookup_model(
         api_key, ('ANTHROPIC_PEDIGREE_MODEL', 'ANTHROPIC_MARKET_SCAN_MODEL'),
         default='auto-sonnet', fable_fallback='sonnet')
     tool = dict(anthropic_web_search_tool(
         budget, default_tool=os.environ.get('PEDIGREE_SEARCH_TOOL') or 'web_search_20250305'),
         max_uses=budget)
-    transient = _anthropic_transient_errs(anthropic)
-    last_err = None
-    for attempt in range(2):
-        try:
-            resp = _anthropic_create(
-                client, model=model, max_tokens=4000, tools=[tool],
-                messages=[{'role': 'user', 'content': content}])
-            break
-        except transient as e:
-            last_err = e
-            if attempt == 1:
-                raise RuntimeError(_friendly_lookup_error(f'{kind.capitalize()} research', e))
-            time.sleep(_bounded_retry_wait(e, 10))
-    else:
-        raise RuntimeError(_friendly_lookup_error(f'{kind.capitalize()} research', last_err))
+    resp = _lookup_with_retries(
+        lambda: _anthropic_create(
+            client, model=model, max_tokens=4000, tools=[tool],
+            messages=[{'role': 'user', 'content': content}]),
+        attempts=2, catch=_anthropic_transient_errs(anthropic),
+        message=lambda e: _friendly_lookup_error(f'{kind.capitalize()} research', e),
+        base=10.0, cap=15.0)
     text = _message_text(resp)
     searches = sum(1 for b in resp.content if getattr(b, 'type', None) == 'server_tool_use')
     app.logger.info('%s research %s: stop=%s searches=%d text=%d chars', kind, category,
@@ -43758,6 +43718,7 @@ def _pedigree_guard(category, kind=None):
 
 @app.route('/<category>/<record_id>/pedigree/<kind>/research', methods=['POST'])
 def pedigree_research_start(category, record_id, kind):
+    require_owner()   # paid lookups are owner-only, like banknote Check
     _pedigree_guard(category, kind)
     db = get_db()
     row = _pedigree_record(db, category, record_id)

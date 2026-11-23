@@ -899,8 +899,10 @@ document.addEventListener('DOMContentLoaded', function () {
       </span>
       <span class="watch-order-spacer"></span>
       <span id="valueSearchedAt" class="value-fetch-stamp">{% if r and r['value_searched_at'] %}as of {{ r['value_searched_at']|short_date }}{% endif %}</span>
+      {#- Value search is a paid lookup: owner-only, like ✓ Check. -#}
+      {%- set _value_owner = g.current_user and g.current_user.role == 'owner' -%}
       <button type="button" id="valueBtn" class="value-search-pill"
-              {% if is_new %}disabled{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"
+              {% if is_new or not _value_owner %}disabled{% if not _value_owner %} title="Only the owner can run a value search"{% endif %}{% else %}data-url="{{ url_for('watch_fetch_value', record_id=r['id']) }}"
               data-searched-at="{{ r['value_searched_at'] if r and r['value_searched_at'] else '' }}"{% endif %}>
         Search Value
       </button>
