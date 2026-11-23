@@ -7262,6 +7262,26 @@ def init_db():
         db.execute('RELEASE SAVEPOINT banknote_display_number_v43')
         db.commit()
 
+    # v44: explicitly named Danish West Indies notes join the Danish colonial
+    # collection, including undated remainders. Only derived P positions change.
+    if not db.execute(
+        "SELECT 1 FROM migration_state WHERE key = ?",
+        ('banknote_display_number_v44',),
+    ).fetchone():
+        db.execute('SAVEPOINT banknote_display_number_v44')
+        try:
+            _renumber_banknotes(db)
+            db.execute(
+                "INSERT INTO migration_state (key, applied_at) VALUES (?, ?)",
+                ('banknote_display_number_v44', datetime.utcnow().isoformat()),
+            )
+        except Exception:
+            db.execute('ROLLBACK TO SAVEPOINT banknote_display_number_v44')
+            db.execute('RELEASE SAVEPOINT banknote_display_number_v44')
+            raise
+        db.execute('RELEASE SAVEPOINT banknote_display_number_v44')
+        db.commit()
+
     banknote_history.init_schema(db)
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)

@@ -714,6 +714,23 @@ coverage. Oceania without Japanese issuer/series evidence remains unresolved;
 French Oceania retains its separate French filing. The v34 position refresh
 changes only display positions, preserving country, issuer and all saved facts.
 
+### Danish West Indies colonial filing (2026-11-22)
+
+The explicit historical country `Danish West Indies` files under **Danish realm
+& dependencies**, with the period label **Danish colonial administration**.
+The territory name establishes this identity even when a Treasury remainder
+has no recorded issue year; no year is inferred from its catalogue or series.
+Modern United States Virgin Islands and British Virgin Islands remain distinct.
+The [Danish National Archives](https://en.rigsarkivet.dk/guide/the-danish-west-indies/)
+documents the colony's Danish rule and its transfer to the United States in 1917.
+
+The shared classifier applies to lists, historical filters and reports. Existing
+Danish West Indies entity coverage is retained. Startup migration v44 resequences
+only display positions (P); permanent B identifiers, full references such as
+P-8r, remainder status, photos and purchase details are preserved. The migration
+is idempotent and rolls back an interrupted resequencing. Regression coverage:
+`tests/test_danish_filing.py`.
+
 ### Catalogue design corrections
 
 Country plus the complete catalogue namespace and variety suffix drives Check

@@ -443,6 +443,7 @@ HISTORIC = {
     'Netherlands Indies': ('dutch', 'Netherlands East Indies — colonial currency area'),
     'Belgian Congo': ('belgian', 'Belgian colonial currency area'),
     'German East Africa': ('german', 'German colonial administration'),
+    'Danish West Indies': ('danish', 'Danish colonial administration'),
 }
 BRITISH_DEPENDENCIES = {'Bermuda', 'Cayman Islands', 'Falkland Islands', 'Gibraltar',
                         'Saint Helena', 'Turks and Caicos Islands', 'Montserrat'}

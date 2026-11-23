@@ -153,7 +153,6 @@ class BanknoteEntityTests(unittest.TestCase):
             ('Newfoundland', 1920, 'british-newfoundland'),
             ('North Borneo', 1939, 'british-british-north-borneo'),
             ('Italian East Africa', 1938, 'italian-italian-east-africa'),
-            ('Danish West Indies', 1905, 'danish-danish-west-indies'),
             ('Portuguese India', 1959, 'portuguese-portuguese-india'),
             ('French India', 1936, 'french-french-india'),
             ('Hawaii', 1897, 'other-hawaii'),
