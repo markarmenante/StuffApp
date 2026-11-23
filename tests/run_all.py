@@ -58,7 +58,8 @@ TESTS = ['test_helpers.py', 'test_smoke.py', 'test_detail_upload_ack.py', 'test_
          'test_market_interrupted.py',
          'test_market_runtime.py',
          'test_market_progressive.py',
-         'test_market_scan.py']
+         'test_market_scan.py',
+         'test_enrichment.py', 'test_document_scan.py', 'test_paid_call_savings.py']
 
 failed = []
 for t in TESTS:

@@ -8,6 +8,7 @@ import base64
 import unicodedata
 import threading
 import time
+import functools
 import market_scan as market_runtime
 import market_colonial
 import market_ebay_feed
@@ -38,6 +39,8 @@ import banknote_printers
 import ebay_orders
 import purchase_orders
 import banknote_imports
+import document_scan
+import enrichment
 import banknote_crop_jobs
 import purchase_lifecycle as purchase_states
 import banknote_feedback
@@ -5118,7 +5121,7 @@ def generate_country_eras(country_name, years=(), existing=()):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('country-history', api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
     prompt = _COUNTRY_ERAS_PROMPT.format(
         name=country_name, current_year=datetime.utcnow().year)
@@ -5208,21 +5211,79 @@ def _run_country_history_job(country_name, slug, years=(), existing=(), token=No
             _COUNTRY_HISTORY_INFLIGHT.discard(slug)
 
 
-def _country_history_years(key):
-    """Read actual saved dates, including catalogue series dates and country aliases."""
+_DATA_VERSION_CONNECTIONS = {}
+_DATA_VERSION_LOCK = threading.Lock()
+
+
+def _db_data_version():
+    """A token that changes whenever any connection commits to the database:
+    SQLite's PRAGMA data_version on a private, never-writing connection, plus
+    the file's identity (a recreated database file reopens the connection).
+    None when unavailable, which disables callers' caches."""
+    try:
+        st = os.stat(DATABASE)
+    except OSError:
+        return None
+    ident = (DATABASE, st.st_dev, st.st_ino)
+    with _DATA_VERSION_LOCK:
+        held = _DATA_VERSION_CONNECTIONS.get(DATABASE)
+        if held is not None and held[0] != ident:
+            try:
+                held[1].close()
+            except sqlite3.Error:
+                pass
+            held = None
+        try:
+            if held is None:
+                held = (ident, sqlite3.connect(DATABASE, check_same_thread=False))
+                _DATA_VERSION_CONNECTIONS[DATABASE] = held
+            return ident + (held[1].execute('PRAGMA data_version').fetchone()[0],)
+        except sqlite3.Error:
+            _DATA_VERSION_CONNECTIONS.pop(DATABASE, None)
+            return None
+
+
+_COUNTRY_YEAR_INDEX = {'key': None, 'index': {}}
+_COUNTRY_YEAR_INDEX_LOCK = threading.Lock()
+
+
+def _country_history_year_index():
+    """{country key: sorted saved note years} for every banknote, built in one
+    pass and reused until the database or the country tables change.
+
+    Before 2026-11-23 each _country_history_years call re-read and
+    re-classified the whole table, once per country in the list view and
+    once per panel-less row in series_panels: about 1,100 full scans (1.4M
+    _country_key calls, ~60 s) for one 1,200-note / 120-country list view."""
+    generated = _generated_country_eras()
+    version = _db_data_version()
+    this_year = datetime.utcnow().year
+    fingerprint = (version, this_year, id(COUNTRY_KEYS), len(COUNTRY_KEYS),
+                   hash(frozenset(generated['spellings'].items())), frozenset(generated['entries']))
+    with _COUNTRY_YEAR_INDEX_LOCK:
+        if version is not None and _COUNTRY_YEAR_INDEX['key'] == fingerprint:
+            return _COUNTRY_YEAR_INDEX['index']
     db = open_db_connection()
     try:
         rows = db.execute('SELECT country, issuer, series, date_1, date_1_text FROM banknotes WHERE country IS NOT NULL').fetchall()
     finally:
         db.close()
-    years = set()
+    index = {}
     for row in rows:
         country = banknote_catalog.collection_country(*(row[field] for field in ('country', 'date_1', 'issuer', 'series')))
-        if (_country_key(country) or _country_slug(country)) == key:
-            year = _note_year(row)
-            if year and 1 <= year <= datetime.utcnow().year:
-                years.add(year)
-    return sorted(years)
+        year = _note_year(row)
+        if year and 1 <= year <= this_year:
+            index.setdefault(_country_key(country) or _country_slug(country), set()).add(year)
+    index = {key: tuple(sorted(years)) for key, years in index.items()}
+    with _COUNTRY_YEAR_INDEX_LOCK:
+        _COUNTRY_YEAR_INDEX['key'] = fingerprint
+        _COUNTRY_YEAR_INDEX['index'] = index
+    return index
+
+
+def _country_history_years(key):
+    """Read actual saved dates, including catalogue series dates and country aliases."""
+    return list(_country_history_year_index().get(key, ()))
 
 
 def _country_history_request(country_name):
@@ -5272,7 +5333,7 @@ def ensure_country_history(country_name, force=False, synchronous=False):
     bound automatic retries. Existing coverage makes this a no-op."""
     if not os.environ.get('ANTHROPIC_API_KEY'):
         return
-    ensure_state_names(country_name)
+    ensure_state_names(country_name, force=force)
     needed = _country_history_request(country_name)
     if not needed:
         return
@@ -5319,7 +5380,7 @@ def _backfill_country_histories():
     for row in rows:
         name = (row['country'] or '').strip()
         state_key = _state_names_key(name)
-        if state_key:
+        if state_key and not enrichment.cooldown_active('state-names:' + state_key):
             with _COUNTRY_HISTORY_INFLIGHT_LOCK:
                 fresh = state_key not in _STATE_NAMES_INFLIGHT
                 if fresh:
@@ -5396,7 +5457,7 @@ def generate_state_names(country_name):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('state-names', api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_COUNTRY_ERAS_MODEL')
     prompt = _STATE_NAMES_PROMPT.format(
         name=country_name, current_year=datetime.utcnow().year)
@@ -5472,9 +5533,14 @@ def _run_state_names_job(country_name, key):
         finally:
             db.close()
         _generated_state_names(force=True)
+        enrichment.clear_failure('state-names:' + key)
         print(f'state names generated: {country_name} ({key}), '
               f'{len(eras)} eras', flush=True)
     except Exception as e:
+        # Durable backoff (1 h, 6 h, 24 h, then weekly): a country whose
+        # answer keeps failing validation used to be re-billed on every
+        # banknote list view and every boot (2026-11-23 review).
+        enrichment.record_failure('state-names:' + key, 'state-names', e)
         print(f'state name generation failed for {country_name}: {e}',
               flush=True)
     finally:
@@ -5482,15 +5548,20 @@ def _run_state_names_job(country_name, key):
             _STATE_NAMES_INFLIGHT.discard(key)
 
 
-def ensure_state_names(country_name):
+def ensure_state_names(country_name, force=False):
     """Fire-and-forget: generate and store state-name bands for a
     country the built-in table doesn't cover. Rides along with
     ensure_country_history, so every banknote write and the startup
-    backfill reach it."""
+    backfill reach it. A failed generation waits out its backoff unless
+    forced by the explicit country-history Retry."""
     if not os.environ.get('ANTHROPIC_API_KEY'):
         return
     key = _state_names_key(country_name)
     if not key:
+        return
+    if force:
+        enrichment.clear_failure('state-names:' + key)
+    elif enrichment.cooldown_active('state-names:' + key):
         return
     with _COUNTRY_HISTORY_INFLIGHT_LOCK:
         if key in _STATE_NAMES_INFLIGHT:
@@ -5876,6 +5947,9 @@ def series_panels(rows):
     def mark(row_id, key, value):
         placements.setdefault(row_id, {})[key] = value
 
+    # One history-state read per country per render, not one per row.
+    history_states = {}
+
     for row in rows:
         panel = _series_panel_for_row(row)
         if panel is None:
@@ -5893,7 +5967,9 @@ def series_panels(rows):
             # country's history takes a minute or two to generate after
             # its first note is saved (Réunion, 2026-09-10).
             country_name = banknote_catalog.collection_country(*(_row_get(row, key) for key in ('country', 'date_1', 'issuer', 'series')))
-            state = _country_history_state(country_name)
+            if country_name not in history_states:
+                history_states[country_name] = _country_history_state(country_name)
+            state = history_states[country_name]
             entry = _country_eras_for(_country_key(country_name))
             year = _note_year(row)
             gap = bool(entry and year and banknote_history.missing_years(entry[1], [year]))
@@ -6152,6 +6228,16 @@ def _migrate_assignat_country(db):
     app.logger.info('Banknote assignat country recovery: corrected=%s', changed)
 
 
+@functools.lru_cache(maxsize=8192, typed=True)
+def _collection_family_scalars(country, date, issuer, series):
+    """(rank, title) of the regional family for the SQL ordering functions.
+    collection_family_issue is pure over static tables, and the banknote list
+    query evaluates it ~23 times per row (WHERE, ORDER BY and grouping), so
+    the scalar results are memoised; Python callers still get fresh dicts."""
+    issue = banknote_catalog.collection_family_issue(country, date, issuer, series) or {}
+    return issue.get('rank', -1), issue.get('title', '')
+
+
 def _configure_db_connection(db):
     db.row_factory = sqlite3.Row
     db.create_function('BANKNOTE_GROUP', 4,
@@ -6159,9 +6245,9 @@ def _configure_db_connection(db):
     db.create_function('BANKNOTE_COUNTRY', 4, banknote_catalog.sort_country, deterministic=True)
     db.create_function('BANKNOTE_DISPLAY_COUNTRY', 4, banknote_catalog.collection_country, deterministic=True)
     db.create_function('COLLECTION_FAMILY_RANK', 4,
-                       lambda *v: (banknote_catalog.collection_family_issue(*v) or {}).get('rank', -1), deterministic=True)
+                       lambda *v: _collection_family_scalars(*v)[0], deterministic=True)
     db.create_function('COLLECTION_FAMILY_SECTION', 4,
-                       lambda *v: (banknote_catalog.collection_family_issue(*v) or {}).get('title', ''), deterministic=True)
+                       lambda *v: _collection_family_scalars(*v)[1], deterministic=True)
     db.create_function('COLLECTION_FAMILY_SERIES', 4, banknote_catalog.collection_family_series, deterministic=True)
     db.create_function('CATALOGUE_REFERENCE_SORT', 1, banknote_catalog.catalogue_reference_sort, deterministic=True)
     db.create_function('CARIBBEAN_DENOMINATION', 1, banknote_catalog.eastern_caribbean_denomination, deterministic=True)
@@ -6230,6 +6316,10 @@ def _configure_db_connection(db):
 
 def open_db_connection():
     return _configure_db_connection(sqlite3.connect(DATABASE))
+
+
+# Paid-call caches and generation cooldowns live in the collection database.
+enrichment.configure(open_db_connection)
 
 
 def _table_cols(db, table):
@@ -7283,6 +7373,7 @@ def init_db():
         db.commit()
 
     banknote_history.init_schema(db)
+    enrichment.init_schema(db)
     market_estimates.init_schema(db)
     market_slab_labels.init_schema(db)
     banknote_catalog_proposals.init_schema(db)
@@ -12013,7 +12104,7 @@ def _vision_crop_verdict(crop, original=None):
         {'type': 'text', 'text': prompt},
     ])
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0, max_retries=0)
+        client = enrichment.anthropic_client('banknote-trim-verdict', api_key=api_key, timeout=30.0, max_retries=0)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
@@ -12444,7 +12535,7 @@ def _note_geometry_scan(img):
         'holder or sleeve is visible. label = a grading-service label '
         'is visible.')
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=30.0, max_retries=0)
+        client = enrichment.anthropic_client('banknote-trim-geometry', api_key=api_key, timeout=30.0, max_retries=0)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
         resp = client.messages.create(
             model=model,
@@ -13735,7 +13826,7 @@ def watch_hertz(beat):
     return None
 
 
-PERPLEXITY_CHAT_COMPLETIONS_URL = 'https://api.perplexity.ai/chat/completions'
+PERPLEXITY_CHAT_COMPLETIONS_URL = enrichment.PERPLEXITY_CHAT_COMPLETIONS_URL
 
 _JSON_NULLABLE_STRING = {'type': ['string', 'null']}
 _JSON_NULLABLE_NUMBER = {'type': ['number', 'null']}
@@ -13823,17 +13914,17 @@ def perplexity_chat_completion(api_key, prompt, *, env_names=None,
                                default_model='sonar-pro', max_tokens=2048,
                                response_schema=None, schema_name='lookup',
                                search_context_env_names=None,
-                               default_search_context='high', images=None):
+                               default_search_context='high', images=None,
+                               kind='perplexity', replay_kind=None):
     """Call Perplexity's search-grounded chat endpoint with retries.
 
     ``images`` (optional) is a list of ``{label, data, media_type}`` from
     _load_coin_vision_images; when given they're sent as base64 image_url
     content blocks ahead of the prompt so Sonar can see the actual item.
-    """
-    import urllib.request
-    import urllib.error
-    import time as _time
 
+    Transport, retries and metering live in enrichment.perplexity_chat.
+    ``replay_kind`` (explicit lookups) shares concurrent identical requests
+    and replays an identical successful answer inside the replay window."""
     if images:
         user_content = []
         for img in images:
@@ -13862,50 +13953,11 @@ def perplexity_chat_completion(api_key, prompt, *, env_names=None,
                 'schema': response_schema,
             },
         }
-    body = json.dumps(body_data).encode('utf-8')
-
-    last_err = None
-    for attempt in range(3):
-        req = urllib.request.Request(
-            PERPLEXITY_CHAT_COMPLETIONS_URL,
-            data=body,
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-            },
-            method='POST',
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=240) as resp:
-                api_data = json.loads(resp.read().decode('utf-8'))
-            try:
-                text = api_data['choices'][0]['message']['content'] or ''
-            except (KeyError, IndexError, TypeError):
-                raise RuntimeError(
-                    f'Unexpected Perplexity response: {str(api_data)[:200]}')
-            return api_data, text.strip()
-        except urllib.error.HTTPError as e:
-            last_err = e
-            if e.code == 429 or 500 <= e.code < 600:
-                wait = 10 * (attempt + 1)
-                try:
-                    ra = e.headers.get('retry-after') if getattr(e, 'headers', None) else None
-                    if ra:
-                        wait = max(wait, int(float(ra)))
-                except Exception:
-                    pass
-                _time.sleep(wait)
-                continue
-            try:
-                detail = e.read().decode('utf-8', 'ignore')[:200]
-            except Exception:
-                detail = ''
-            raise RuntimeError(f'Perplexity HTTP {e.code}: {detail}')
-        except urllib.error.URLError as e:
-            last_err = e
-            _time.sleep(10 * (attempt + 1))
-    raise RuntimeError(f'Lookup failed after retries: {last_err}')
+    if replay_kind:
+        return enrichment.replay(replay_kind, body_data,
+                                 lambda: enrichment.perplexity_chat(api_key, body_data, replay_kind),
+                                 accept=enrichment.perplexity_completed)
+    return enrichment.perplexity_chat(api_key, body_data, kind)
 
 
 def _require_anthropic_key():
@@ -13916,11 +13968,26 @@ def _require_anthropic_key():
     if not api_key:
         raise RuntimeError('ANTHROPIC_API_KEY not configured')
     return api_key
-    return api_key
 
 
-def _anthropic_create(client, **kwargs):
+def _anthropic_create(client, replay_kind=None, **kwargs):
     """client.messages.create plus web-search pause_turn continuation.
+
+    ``replay_kind`` (explicit lookups only) routes the whole exchange through
+    enrichment.replay: concurrent identical requests share one provider call,
+    and an identical successful request inside the replay window returns the
+    stored response instead of paying again (2026-11-23 review). The request
+    fingerprint is the exact model/tools/messages/system/budget sent."""
+    if replay_kind:
+        request = {key: value for key, value in kwargs.items() if key != 'timeout'}
+        return enrichment.replay(replay_kind, request,
+                                 lambda: _anthropic_create_uncached(client, **kwargs),
+                                 accept=enrichment.anthropic_completed)
+    return _anthropic_create_uncached(client, **kwargs)
+
+
+def _anthropic_create_uncached(client, **kwargs):
+    """The original continuation loop (see _anthropic_create).
 
     A turn using a server tool (web search) can pause mid-run: the
     response arrives with stop_reason='pause_turn' and typically no
@@ -14099,7 +14166,7 @@ results_markdown rules:
 - Keep the whole field under ~600 chars.
 - Use null for consensus_usd / watchcharts_median_usd if not available."""
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('watch-value', api_key=api_key)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_WATCH_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(10 if auction_first else 5)
 
@@ -14109,6 +14176,7 @@ results_markdown rules:
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind=None if auction_first else 'watch-value',
                 model=lookup_model,
                 max_tokens=1536,
                 tools=[web_search],
@@ -14221,6 +14289,8 @@ results_markdown rules:
     api_data, text = perplexity_chat_completion(
         api_key,
         prompt,
+        kind='watch-value',
+        replay_kind=None if auction_first else 'watch-value',
         env_names=('PERPLEXITY_WATCH_VALUE_MODEL',
                    'PERPLEXITY_WATCH_LOOKUP_MODEL'),
         default_model='sonar-pro',
@@ -14377,6 +14447,24 @@ def watches_revalue():
     restore = payload.get('restore') or None
     threading.Thread(target=_run_revaluation, args=(brand, job_key, ids, restore), daemon=True).start()
     return jsonify({'ok': True, 'running': True, 'job': job_key})
+
+
+@app.route('/admin/ai-usage')
+def admin_ai_usage():
+    """Owner-only: paid model calls by kind since this instance started
+    (requests, replays, shared in-flight joins, content-cache hits, tokens,
+    web searches), the inventory of call kinds, and background generations
+    waiting out a failure backoff. Read-only; makes no model call."""
+    require_owner()
+    usage = enrichment.usage_snapshot()
+    kinds = [dict(kind=kind, **info, **usage.get(kind, {})) for kind, info in enrichment.KINDS.items()]
+    kinds += [dict(kind=kind, **enrichment.kind_info(kind), **row)
+              for kind, row in usage.items() if kind not in enrichment.KINDS]
+    response = jsonify(kinds=kinds, replay_seconds=enrichment.replay_ttl(),
+                       vision_max_edge=enrichment.vision_max_edge(),
+                       generation_backoff=enrichment.failures_snapshot())
+    response.headers['Cache-Control'] = 'private, no-store'
+    return response
 
 
 @app.route('/watches/revalue/status')
@@ -14543,6 +14631,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
     api_data, text = perplexity_chat_completion(
         api_key,
         prompt,
+        kind='watch-specs',
+        replay_kind='watch-specs',
         env_names='PERPLEXITY_WATCH_LOOKUP_MODEL',
         default_model='sonar-pro',
         max_tokens=2048,
@@ -14584,47 +14674,21 @@ def _sniff_image_media_type(raw):
     return None
 
 
-# Anthropic rejects any image whose base64 payload exceeds 10 MB and
-# recommends <=1568 px on the long edge. Keep a safety margin under the hard
-# limit so a large catalog scan never trips a 400 on the whole request.
-_VISION_IMAGE_B64_CAP = 4_500_000   # ~4.5 MB base64 (~3.4 MB of image bytes)
-_VISION_IMAGE_MAX_EDGE = 1568
+# Anthropic rejects any image whose base64 payload exceeds 10 MB and scales
+# anything longer than 1568 px on the long edge down before the model sees it.
+# Since 2026-11-23 every vision image is bounded to that edge here (it used to
+# pass through at full camera resolution unless its base64 exceeded the cap),
+# so Check, serial scan, coin research and pedigree upload a fraction of the
+# bytes, and re-send a fraction on each pause_turn continuation.
+_VISION_IMAGE_B64_CAP = enrichment.VISION_B64_CAP   # ~4.5 MB base64 (~3.4 MB of image bytes)
+_VISION_IMAGE_MAX_EDGE = enrichment.VISION_MAX_EDGE
 
 
 def _fit_vision_image(raw, media_type):
-    """Return ``(base64_data, media_type)`` for a vision API call, shrinking the
-    image when its base64 would exceed the size cap. Small images pass through
-    untouched; oversized ones are downscaled to <=1568 px and re-encoded as
-    progressively-more-compressed JPEG until they fit."""
-    import base64
-    b64 = base64.b64encode(raw).decode('ascii')
-    if len(b64) <= _VISION_IMAGE_B64_CAP:
-        return b64, media_type
-    try:
-        import io
-        from PIL import Image, ImageOps
-        with Image.open(io.BytesIO(raw)) as im:
-            im = ImageOps.exif_transpose(im)
-            if im.mode not in ('RGB', 'L'):
-                im = im.convert('RGB')
-            longest = max(im.size)
-            if longest > _VISION_IMAGE_MAX_EDGE:
-                scale = _VISION_IMAGE_MAX_EDGE / float(longest)
-                im = im.resize((max(1, round(im.width * scale)),
-                                max(1, round(im.height * scale))),
-                               Image.LANCZOS)
-            last = b64
-            for quality in (85, 75, 65, 55, 45):
-                buf = io.BytesIO()
-                im.save(buf, format='JPEG', quality=quality, optimize=True)
-                last = base64.b64encode(buf.getvalue()).decode('ascii')
-                if len(last) <= _VISION_IMAGE_B64_CAP:
-                    return last, 'image/jpeg'
-            return last, 'image/jpeg'
-    except Exception:
-        # If PIL can't process it, hand back the original encoding — no worse
-        # than before, and the other image (if any) may still go through.
-        return b64, media_type
+    """Return ``(base64_data, media_type)`` for a vision API call. Images
+    already within 1568 px and the size cap pass through byte-for-byte; see
+    enrichment.fit_vision_image for the downscale rules."""
+    return enrichment.fit_vision_image(raw, media_type, b64_cap=_VISION_IMAGE_B64_CAP)
 
 
 _VISION_EXT_MEDIA = {
@@ -14720,7 +14784,7 @@ what the description says.
 
 Reply with ONLY a JSON object, no prose:
 {{"match": true|false, "confidence": 0.0, "reason": "one short sentence"}}"""})
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('coin-image-audit', api_key=api_key)
     resp = client.messages.create(
         model='claude-haiku-4-5-20251001',
         max_tokens=300,
@@ -15161,7 +15225,7 @@ def fetch_coin_context(coin):
         message_content = prompt
 
     timeout, attempts = _coin_research_retry_settings()
-    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
+    client = enrichment.anthropic_client('coin-context', api_key=api_key, timeout=timeout)
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
@@ -15177,6 +15241,7 @@ def fetch_coin_context(coin):
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind='coin-context',
                 model=lookup_model,
                 max_tokens=max_tokens,
                 tools=[web_search],
@@ -15211,6 +15276,8 @@ def fetch_coin_context_perplexity(coin):
     api_data, text = perplexity_chat_completion(
         api_key,
         prompt,
+        kind='coin-context',
+        replay_kind='coin-context',
         env_names='PERPLEXITY_COIN_RESEARCH_MODEL',
         default_model='sonar-pro',
         max_tokens=max_tokens,
@@ -15327,7 +15394,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
 {{"markdown": "4–7 short lines. Prefix factual claims with '- '. Lead with pedigree / reference evidence when present, then add necessary historical context. Include 2–4 source URLs as trailing bare URLs after relevant bullets. Under ~900 chars total."}}"""
 
     timeout, attempts = _coin_research_retry_settings()
-    client = anthropic.Anthropic(api_key=api_key, timeout=timeout)
+    client = enrichment.anthropic_client('coin-history', api_key=api_key, timeout=timeout)
     lookup_model = anthropic_lookup_model(
         api_key,
         ('ANTHROPIC_COIN_RESEARCH_MODEL', 'ANTHROPIC_COIN_LOOKUP_MODEL'),
@@ -15356,6 +15423,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind='coin-history',
                 model=lookup_model,
                 max_tokens=900,
                 tools=[web_search],
@@ -15405,6 +15473,11 @@ def resolve_anthropic_lookup_model(api_key, configured_model, fable_fallback='op
     else:
         return model
 
+    # The Models API answer changes rarely; it used to be fetched (up to 5 s)
+    # before every lookup, Check and scan theme. Only real answers are cached.
+    cached = enrichment.cached_model_alias(family, api_key)
+    if cached:
+        return cached
     try:
         import urllib.request
         req = urllib.request.Request(
@@ -15421,6 +15494,7 @@ def resolve_anthropic_lookup_model(api_key, configured_model, fable_fallback='op
             display_name = (item.get('display_name') or '').strip()
             haystack = f'{model_id} {display_name}'.lower()
             if model_id and family in haystack:
+                enrichment.remember_model_alias(family, api_key, model_id)
                 return model_id
     except Exception:
         pass
@@ -15673,13 +15747,14 @@ after, list 2–4 source URLs (bare https://…, comma-separated) in
 a <urls>…</urls> tag. No prose outside these tags, no code
 fences, no JSON.{players_block}{tracks_block}{genre_block}{year_block}{label_block}{vinyl_pressing_block}"""
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('recording-notes', api_key=api_key)
     import time as _time
     last_err = None
     for attempt in range(3):
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind='recording-notes',
                 model=lookup_model,
                 max_tokens=2000,
                 tools=[web_search],
@@ -17045,7 +17120,7 @@ def _market_call_theme_once(api_key, category, theme_key, prompt):
         return [], 'anthropic package not installed'
     client = None
     try:
-        client = anthropic.Anthropic(api_key=api_key, timeout=240, max_retries=0)
+        client = enrichment.anthropic_client('market-scan', api_key=api_key, timeout=240, max_retries=0)
         model = _market_resolve_model(api_key)
         resp = _market_discovery_call(
             client,
@@ -17485,19 +17560,47 @@ def _banknote_provider_create(client, *, stage, deadline, **kwargs):
             time.sleep(delay)
 
 
+_PHOTO_SIDES_CACHE_SECONDS = 30 * 86400
+
+
+def _photo_sides_request(photos, model):
+    """Content identity of one side classification: the model, the prompt and
+    each photograph's id, sha256 and gallery/reference role, in order."""
+    import hashlib
+    entries = []
+    for photo in photos:
+        digest = photo.get('sha256')
+        if not isinstance(digest, str):
+            digest = hashlib.sha256(
+                banknote_photo_sides._file(UPLOAD_FOLDER, photo['filename']).read_bytes()).hexdigest()
+        entries.append([photo['id'], digest, bool(photo.get('gallery'))])
+    return {'model': model, 'max_tokens': 5000, 'prompt': banknote_photo_sides.PROMPT,
+            'encoding': 'jpeg-1100-q78', 'photos': entries}
+
+
 def _classify_banknote_listing_photos(photos):
-    """Bounded image-only side check; no web tools or purchase/private facts."""
+    """Bounded image-only side check; no web tools or purchase/private facts.
+
+    The same photographs (by content hash) are classified once: a conclusive
+    decision is reused by draft Check, record Check and market Buy for 30
+    days. Uncertain decisions are never reused, so a retried Check asks the
+    model again (banknote_photo_sides.conclusive)."""
     import anthropic
     content = banknote_photo_sides.vision_content(photos, UPLOAD_FOLDER)
     api_key = _require_anthropic_key()
-    client = anthropic.Anthropic(api_key=api_key, timeout=35.0, max_retries=0)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_NOTE_QUAD_MODEL')
-    response = _banknote_provider_create(client, stage='photo-sides', deadline=time.monotonic() + 35,
-        model=model,
-        max_tokens=5000, messages=[{'role': 'user', 'content': content}])
-    if response.stop_reason != 'end_turn':
-        raise ValueError('Photograph classification did not complete')
-    return parse_model_json_object(_message_text(response))
+
+    def classify():
+        client = enrichment.anthropic_client('banknote-photo-sides', api_key=api_key, timeout=35.0, max_retries=0)
+        response = _banknote_provider_create(client, stage='photo-sides', deadline=time.monotonic() + 35,
+            model=model,
+            max_tokens=5000, messages=[{'role': 'user', 'content': content}])
+        if response.stop_reason != 'end_turn':
+            raise ValueError('Photograph classification did not complete')
+        return parse_model_json_object(_message_text(response))
+    return enrichment.remember('banknote-photo-sides', _photo_sides_request(photos, model), classify,
+                               accept=lambda decision: banknote_photo_sides.conclusive(decision, photos),
+                               ttl=_PHOTO_SIDES_CACHE_SECONDS)
 
 
 def _market_store_banknote_images(item):
@@ -19028,7 +19131,7 @@ def _market_catalogue_stage(api_key, db, category, profile, holdings, coverage, 
     client = None
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=api_key, timeout=180, max_retries=0)
+        client = enrichment.anthropic_client('market-scan', api_key=api_key, timeout=180, max_retries=0)
         model = _market_resolve_model(api_key)
         # Catalogue shaping has no web tools. Token exhaustion never restarts
         # discovery; malformed text gets at most one bounded JSON-only repair.
@@ -19153,7 +19256,7 @@ def _market_ebay_source(api_key, inputs):
     if not cards:
         return [], '; '.join(errors) or None, notes
     import anthropic
-    client = anthropic.Anthropic(api_key=api_key, timeout=240, max_retries=0)
+    client = enrichment.anthropic_client('market-scan', api_key=api_key, timeout=240, max_retries=0)
     out = []
     try:
         model = _market_resolve_model(api_key)
@@ -19752,7 +19855,7 @@ def _market_read_slab_label(data):
         photo.save(buffer, format='JPEG', quality=92)
     encoded, media_type = _fit_vision_image(buffer.getvalue(), 'image/jpeg')
     api_key = _require_anthropic_key()
-    client = anthropic.Anthropic(api_key=api_key, timeout=60, max_retries=0)
+    client = enrichment.anthropic_client('market-slab-label', api_key=api_key, timeout=60, max_retries=0)
     try:
         response = client.messages.create(
             model=anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL'),
@@ -19817,7 +19920,7 @@ def _market_capture_bridge_estimate_basis(db):
 
 def _market_estimate_research(wanted, context):
     import anthropic
-    client = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'],
+    client = enrichment.anthropic_client('market-estimate', api_key=os.environ['ANTHROPIC_API_KEY'],
                                  timeout=min(180, context.remaining()), max_retries=0)
     try:
         with market_runtime.scope(context, 'estimates'):
@@ -21558,7 +21661,7 @@ def _run_collection_analysis(category, analysis_id):
             raise RuntimeError('anthropic package not installed')
         profile = _analysis_profile(db, category)
         prompt = _analysis_prompt(category, profile)
-        client = anthropic.Anthropic(api_key=api_key, timeout=600)
+        client = enrichment.anthropic_client('collection-analysis', api_key=api_key, timeout=600)
         model = anthropic_lookup_model(api_key, 'ANTHROPIC_ANALYSIS_MODEL',
                                        default='auto-sonnet', fable_fallback='opus')
         resp = _anthropic_create(
@@ -24052,16 +24155,11 @@ def file_thumb(filename):
             from PIL import Image, ImageOps
             if ext == '.pdf':
                 try:
-                    import pypdfium2 as pdfium
+                    import pypdfium2  # noqa: F401  (availability check)
                 except ImportError as e:
                     return _bail(f'pypdfium2 not installed: {e}', code=500)
-                doc = pdfium.PdfDocument(src)
-                try:
-                    page = doc[0]
-                    bitmap = page.render(scale=2.0)
-                    pil = bitmap.to_pil()
-                finally:
-                    doc.close()
+                # Shared document service: page 1 rendered for a 320 px thumb.
+                pil = document_scan.render_first_page(src, 320)
             elif ext in ('.heic', '.heif'):
                 try:
                     import pillow_heif
@@ -24539,7 +24637,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
   "sources": "one-line note of which sources hit"
 }}"""
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    client = enrichment.anthropic_client('art-lookup', api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_ART_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(3)
     import time as _time
@@ -24549,6 +24647,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind='art-lookup',
                 model=lookup_model,
                 max_tokens=1024,
                 tools=[web_search],
@@ -26570,7 +26669,7 @@ def generate_era_supplement(year, polity, place, lat, lng):
         import anthropic
     except ImportError:
         raise RuntimeError('anthropic package not installed.')
-    client = anthropic.Anthropic(api_key=api_key)
+    client = enrichment.anthropic_client('era-supplement', api_key=api_key)
     model = anthropic_lookup_model(api_key, 'ANTHROPIC_ERA_MAP_MODEL')
     prompt = _ERA_SUPPLEMENT_PROMPT.format(
         year=int(year), year_label=_era_year_label(year),
@@ -26648,9 +26747,13 @@ def _run_era_supplement_job(key, year, polity, place, lat, lng):
             db.commit()
         finally:
             db.close()
+        enrichment.clear_failure('era-supplement:' + key)
         print(f'era supplement drawn: {key} ({d["from"]}–{d["to"]}, '
               f'{len(d["geojson"]["features"])} polities)', flush=True)
     except Exception as e:
+        # Durable backoff: this is commissioned by a detail-page map view, and
+        # a drawing that fails validation used to be re-billed on every view.
+        enrichment.record_failure('era-supplement:' + key, 'era-supplement', e)
         print(f'era supplement failed for {key}: {e}', flush=True)
     finally:
         with _COUNTRY_HISTORY_INFLIGHT_LOCK:
@@ -26663,6 +26766,11 @@ def ensure_era_supplement(year, polity, place, lat, lng):
     if not os.environ.get('ANTHROPIC_API_KEY'):
         return False
     key = _era_supplement_key(year, polity, lat, lng)
+    with _COUNTRY_HISTORY_INFLIGHT_LOCK:
+        if key in _ERA_SUPPLEMENT_INFLIGHT:
+            return True
+    if enrichment.cooldown_active('era-supplement:' + key):
+        return False
     with _COUNTRY_HISTORY_INFLIGHT_LOCK:
         if key in _ERA_SUPPLEMENT_INFLIGHT:
             return True
@@ -27415,6 +27523,8 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
         api_data, text = perplexity_chat_completion(
             api_key,
             prompt,
+            kind='coin-specs',
+            replay_kind='coin-specs',
             env_names='PERPLEXITY_COIN_SPEC_LOOKUP_MODEL',
             default_model='sonar-pro',
             max_tokens=2048,
@@ -27438,7 +27548,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0)
+    client = enrichment.anthropic_client('coin-specs', api_key=api_key, timeout=240.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
     import time as _time
@@ -27449,6 +27559,7 @@ Reply with ONLY a JSON object, no prose, no code fences. Use null when a value i
         try:
             resp = _anthropic_create(
                 client,
+                replay_kind='coin-specs',
                 model=lookup_model,
                 max_tokens=2048,
                 tools=[web_search],
@@ -28710,7 +28821,7 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=75.0, max_retries=0)
+    client = enrichment.anthropic_client('banknote-check', api_key=api_key, timeout=75.0, max_retries=0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
     web_search = anthropic_web_search_tool(4)
 
@@ -28736,8 +28847,19 @@ Reply with a JSON object, without code fences. A short paragraph containing nati
         search_left = max(0, 4 - banknote_catalog_lookup.tool_uses(responses, 'web_search'))
         search_tools = ([dict(web_search, max_uses=search_left)] if search_left else [])
         try:
-            resp = _banknote_provider_create(client, stage='identification', deadline=deadline,
-                model=lookup_model, max_tokens=8192, tools=search_tools, messages=messages)
+            def identify(messages=list(messages), search_tools=search_tools):
+                return _banknote_provider_create(client, stage='identification', deadline=deadline,
+                    model=lookup_model, max_tokens=8192, tools=search_tools, messages=messages)
+            if len(messages) == 1:
+                # Concurrent identical Checks (double submit, two tabs, the
+                # draft worker beside an explicit Check) share the first turn.
+                # No replay: an explicit retry always asks the model again.
+                resp = enrichment.single_flight(
+                    enrichment.fingerprint('banknote-check', dict(model=lookup_model, tools=search_tools,
+                                                                   messages=messages)),
+                    identify, 'banknote-check')
+            else:
+                resp = identify()
         except Exception as e:
             raise RuntimeError(_friendly_lookup_error('Banknote spec lookup', e)) from e
         responses.append(resp.model_dump())
@@ -29617,7 +29739,7 @@ def scan_banknote_serial(note):
         import anthropic
     except ImportError:
         raise RuntimeError("anthropic package not installed.")
-    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+    client = enrichment.anthropic_client('banknote-serial-scan', api_key=api_key, timeout=120.0)
     lookup_model = anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL')
 
     content = []
@@ -43039,7 +43161,7 @@ def _pedigree_model_call(kind, category, prompt, images):
     else:
         content = prompt
     budget = _pedigree_search_budget(kind)
-    client = anthropic.Anthropic(api_key=api_key, timeout=480, max_retries=1)
+    client = enrichment.anthropic_client('pedigree', api_key=api_key, timeout=480, max_retries=1)
     model = anthropic_lookup_model(
         api_key, ('ANTHROPIC_PEDIGREE_MODEL', 'ANTHROPIC_MARKET_SCAN_MODEL'),
         default='auto-sonnet', fable_fallback='sonnet')
@@ -44102,7 +44224,7 @@ banknote_feedback.register(app, get_db, require_owner, _user_can_see_row)
 def _compare_original_listing(category, record, url, page_text, purchase_sources=()):
     import anthropic
     api_key = _require_anthropic_key()
-    client = anthropic.Anthropic(api_key=api_key, timeout=60, max_retries=0)
+    client = enrichment.anthropic_client('original-listing-compare', api_key=api_key, timeout=60, max_retries=0)
     response = client.messages.create(
         model=anthropic_lookup_model(api_key, 'ANTHROPIC_COIN_LOOKUP_MODEL'), max_tokens=4096,
         system=('Compare saved collection fields with this exact original listing and its linked purchase sources. '
