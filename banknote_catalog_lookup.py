@@ -294,6 +294,35 @@ def reference_in(quote, key):
     return any(reference(m.group()) == key for m in re.finditer(pattern, quote, re.I))
 
 
+def reference_source_supports(url, source_text, key, note):
+    """The cited source names this complete reference.
+
+    PMG's price guide lists the Pick number bare in its "Pick Number" column
+    ("33a Landsbanki Íslands Law of 15.4.1928 10 Krónur …"). On that page only,
+    a row that starts with the exact number, continues with words and names the
+    saved denomination counts as the reference (Iceland P-33a, 2026-11-24).
+    """
+    if reference_in(source_text, key):
+        return True
+    namespace, number = key.split(':', 1)
+    try:
+        parsed = urlsplit(url) if isinstance(url, str) else None
+    except ValueError:
+        parsed = None
+    if (namespace != 'pick' or not parsed or parsed.scheme != 'https'
+            or parsed.hostname not in ('pmgnotes.com', 'www.pmgnotes.com')
+            or 'priceguide' not in parsed.path.lower()
+            or not re.search(r'\bPick Number\b', source_text, re.I)):
+        return False
+    denomination = folded((note or {}).get('denomination'))
+    if not denomination:
+        return False
+    rows = folded(source_text)
+    pattern = (r'(?<![a-z0-9])' + re.escape(folded(number)) + r' (?=[a-z])(.{0,150}?)(?<![a-z0-9])'
+               + re.escape(denomination) + r'(?![a-z0-9])')
+    return re.search(pattern, rows) is not None
+
+
 def country_in(quote, country):
     # Use the existing longest-alias recognition so India does not claim
     # British India, nor Somalia French Somaliland. No sovereign inference.
@@ -667,6 +696,9 @@ def validate_all(note, recovered, research, sources, previous=None, *, allow_rev
     result['fields'].update(fallback)
     for field in conflicts:
         result['fields'].pop(field, None)
+        result.setdefault('rejected', {})[field] = 'conflicting_sources'
+    for field in result['fields']:
+        result.get('rejected', {}).pop(field, None)
     if result['fields']:
         result.update(state='ready', message='Missing details confirmed against the matching catalogue reference.')
     else:
@@ -681,8 +713,13 @@ def validate(note, recovered, research, sources, *, allow_review=False):
     saved fields are authoritative, with explicit review available for the four
     design fields. A conflicting direct identity withholds catalogue proposals.
     """
-    result = dict(state='unresolved', message='Catalogue details could not be confirmed for this exact note.', fields={})
+    # rejected: field -> "reason@source host" (or identity -> reason), logged as
+    # reason codes and catalogue domains only, never values or full URLs.
+    rejected = {}
+    result = dict(state='unresolved', message='Catalogue details could not be confirmed for this exact note.',
+                  fields={}, rejected=rejected)
     if not isinstance(research, dict) or not isinstance(sources, dict):
+        rejected['identity'] = 'no_research'
         return result
     target = dict(note)
     for field in IDENTITY_FIELDS:
@@ -697,42 +734,55 @@ def validate(note, recovered, research, sources, *, allow_review=False):
             else:
                 same = folded(value) == folded(target[field])
             if not same:
+                rejected['identity'] = 'direct_conflict_' + field
                 return result
         else:
             target[field] = value
     country = catalog.canonical_country(target.get('country'))
     reference_text = ' '.join(text(target.get(field)) for field in ('pick_number', 'other_catalog'))
     if re.search(r'\b(?:possibly|probably|perhaps|uncertain|either|or)\b|\?', reference_text, re.I):
+        rejected['identity'] = 'uncertain_reference'
         return result
     keys = references(target)
     if any(sum(k.split(':', 1)[0] == namespace for k in keys) > 1
            for namespace in {k.split(':', 1)[0] for k in keys}):
+        rejected['identity'] = 'several_references'
         return result
     identity = research.get('identity')
     if not country or not keys or not isinstance(identity, dict) or identity.get('match') != 'exact':
+        rejected['identity'] = 'not_exact'
         return result
     key = reference(identity.get('reference'))
-    if key not in keys or catalog.canonical_country(identity.get('country')) != country:
+    if key not in keys:
+        rejected['identity'] = 'reference_mismatch'
+        return result
+    if catalog.canonical_country(identity.get('country')) != country:
+        rejected['identity'] = 'country_mismatch'
         return result
     # State-series references repeat across states. Country + Cr number alone
     # cannot identify a state issue, even when a model claims an exact match.
     if key.startswith(('criswell:', 'haxby:')):
         state = text(identity.get('state'))
         if not state or not contains(target.get('issuer'), state):
+            rejected['identity'] = 'state_missing'
             return result
     known = {field: target[field] for field in ('denomination', 'issuer', 'series', 'date_1', 'date_2', 'date_1_text', 'date_2_text')
              if not is_blank(target.get(field))}
-    if any(folded(identity.get(field)) != folded(value) for field, value in known.items()):
+    mismatched = [field for field, value in known.items() if folded(identity.get(field)) != folded(value)]
+    if mismatched:
+        rejected['identity'] = 'differs_' + '_'.join(sorted(mismatched))
         return result
     entries = research.get('fields')
     if not isinstance(entries, dict):
+        rejected['identity'] = 'no_fields'
         return result
     for field, entry in entries.items():
         target_field = 'condition' if field == 'history_context' else field
         reviewable = allow_review and field in REVIEW_FIELDS
-        if (field not in FIELDS or not isinstance(entry, dict)
-                or (not reviewable and (not is_blank(note.get(target_field))
-                                        or not is_blank(recovered.get(target_field))))):
+        if field not in FIELDS or not isinstance(entry, dict):
+            continue
+        if not reviewable and (not is_blank(note.get(target_field)) or not is_blank(recovered.get(target_field))):
+            rejected[field] = 'occupied'
             continue
         if field == 'date_1' and not is_blank(note.get('date_1_text')):
             continue
@@ -743,8 +793,21 @@ def validate(note, recovered, research, sources, *, allow_review=False):
         quotes = source.get('quotes', [])
         quote = text(plain(entry.get('quote')))
         scope = entry.get('scope')
-        if (scope not in ('type', 'variety') or not 8 <= len(quote) <= 1500
-                or not any(text(q).find(quote) >= 0 for q in quotes)):
+        try:
+            host = (urlsplit(url).hostname or 'unknown') if isinstance(url, str) else 'none'
+        except ValueError:
+            host = 'invalid'
+
+        def reject(reason):
+            rejected[field] = reason + '@' + host
+        if not source:
+            reject('uncited_source')
+            continue
+        if scope not in ('type', 'variety') or not 8 <= len(quote) <= 1500:
+            reject('quote_shape')
+            continue
+        if not any(text(q).find(quote) >= 0 for q in quotes):
+            reject('quote_not_in_source')
             continue
         source_text = '\n'.join(str(q) for q in quotes)
         # A short model quote must obey the same entry/issue-table binding as
@@ -753,13 +816,19 @@ def validate(note, recovered, research, sources, *, allow_review=False):
         if (_numista_entry_url(url) and isinstance(document, str)
                 and re.search(r'^\s*(?:#{1,6}\s*)?Features\s*\n', document, re.M)
                 and _numista_type_features(target, url, source) is None):
+            reject('numista_entry_mismatch')
             continue
         country_context = source.get('title', '')
         if not country_in(country_context, country):
             country_context = source_text[:1500] if source.get('document_text') else source_text
-        if not all(reference_in(source_text, ref) for ref in keys) or not country_in(country_context, country):
+        if not all(reference_source_supports(url, source_text, ref, target) for ref in keys):
+            reject('reference_missing')
+            continue
+        if not country_in(country_context, country):
+            reject('country_missing')
             continue
         if key.startswith(('criswell:', 'haxby:')) and not contains(source_text, identity['state']):
+            reject('state_missing')
             continue
         # Known denomination/issuer must be present on this cited source. A
         # known date/series additionally fences every variety-sensitive field.
@@ -767,6 +836,7 @@ def validate(note, recovered, research, sources, *, allow_review=False):
                     else denomination_in(source_text, value, country) if name == 'denomination'
                     else contains(source_text, value)) for name, value in known.items()
                if name in ('issuer', 'denomination') or scope == 'variety'):
+            reject('known_detail_missing')
             continue
         # A field excerpt naming an adjacent variety cannot borrow this note's
         # identity from another citation paragraph on the same catalogue page.
@@ -777,6 +847,7 @@ def validate(note, recovered, research, sources, *, allow_review=False):
             features = _numista_type_features(target, url, source)
             if (scope != 'type' or field in VARIETY_FIELDS or explicit_refs != {_pick_type(key)}
                     or not features or quote not in text(features)):
+                reject('adjacent_reference')
                 continue
         if field in VARIETY_FIELDS:
             if scope != 'variety':
@@ -811,6 +882,7 @@ def validate(note, recovered, research, sources, *, allow_review=False):
             continue
         if not contains(quote, value) and not (field == 'official' and portrait_supported(quote, value)):
             if field not in ('obv_rev', 'lettering', 'lettering_translation'):
+                reject('value_not_in_quote')
                 continue
             parts = re.split(r'\s*/\s*|\n', str(value))
             parts = [re.sub(r'^(?:Obv(?:erse)?|Rev(?:erse)?|Front|Back)\s*:\s*', '', part, flags=re.I) for part in parts]

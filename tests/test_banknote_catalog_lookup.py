@@ -619,5 +619,56 @@ class StandardCatalogPortraitTests(unittest.TestCase):
         self.assertNotIn('site:realbanknotes.com', lookup.prompt(dict(ICELAND, official='Jón Sigurðsson')))
 
 
+PMG_URL = 'https://www.pmgnotes.com/priceguide/world-note-prices.aspx?deid=1740745&subcat=law-of-15.4.1928'
+PMG_TEXT = """1928 Iceland 10 Krónur values and price guide
+Specifications
+Year/Issue: 1928
+Denomination: 10 Krónur
+Face Color: Red on multicolor underprint.
+Face Type: Portrait J. Sigurdsson at left.
+Back Type: Waterfalls at right.
+Pick Number Description 4 8 12 20 40 50 60 63
+33s Landsbanki Íslands Law of 15.4.1928 10 Krónur Specimen. $ - - - 185 -
+33a Landsbanki Íslands Law of 15.4.1928 10 Krónur Without serial # prefix. Signature 6, 8-11. $ - 10 - 18 - - 30 -
+33b Landsbanki Íslands Law of 15.4.1928 10 Krónur Serial # prefix C. Signature 8-11."""
+
+
+class PmgPriceGuideAndReasonTests(unittest.TestCase):
+    """Iceland P-33a, second Check (2026-11-24): the portrait was claimed but
+    rejected with no visible reason; PMG lists the Pick number bare."""
+
+    def research(self, url, quote, value='Jón Sigurðsson'):
+        identity = {field: ICELAND.get(field) for field in lookup.IDENTITY_FIELDS}
+        identity.update(match='exact', reference='P-33a', variety_dates=[])
+        return dict(identity=identity, fields={'official': dict(value=value, scope='type', source_url=url, quote=quote)})
+
+    def pmg(self, text=PMG_TEXT, url=PMG_URL):
+        return {url: dict(title='1928 Iceland 10 Krónur values and price guide', quotes=[text], document_text=text)}
+
+    def test_price_guide_pick_column_names_the_exact_reference(self):
+        result = lookup.validate(ICELAND, {}, self.research(PMG_URL, 'Face Type: Portrait J. Sigurdsson at left.'), self.pmg())
+        self.assertEqual(result['fields']['official']['value'], 'Jón Sigurðsson')
+
+    def test_price_guide_binding_is_exact_and_pmg_only(self):
+        only_b = PMG_TEXT.replace('33a Landsbanki', '33c Landsbanki')
+        result = lookup.validate(ICELAND, {}, self.research(PMG_URL, 'Face Type: Portrait J. Sigurdsson at left.'), self.pmg(only_b))
+        self.assertEqual(result['fields'], {})
+        self.assertEqual(result['rejected']['official'], 'reference_missing@www.pmgnotes.com')
+        other = 'https://example-dealer.com/priceguide/iceland'
+        self.assertEqual(lookup.validate(ICELAND, {}, self.research(other, 'Face Type: Portrait J. Sigurdsson at left.'),
+                                         self.pmg(url=other))['fields'], {})
+        # A price before the next row's number is not a Pick number.
+        self.assertFalse(lookup.reference_source_supports(PMG_URL, PMG_TEXT, 'pick:33', dict(ICELAND)))
+
+    def test_rejections_carry_a_reason_and_domain_only(self):
+        result = lookup.validate(ICELAND, {}, self.research(PMG_URL, 'Not on the page at all.'), self.pmg())
+        self.assertEqual(result['rejected'], {'official': 'quote_not_in_source@www.pmgnotes.com'})
+        wrong = self.research(PMG_URL, 'Face Type: Portrait J. Sigurdsson at left.', value='Jón Eiríksson')
+        self.assertEqual(lookup.validate(ICELAND, {}, wrong, self.pmg())['rejected'], {'official': 'value_not_in_quote@www.pmgnotes.com'})
+        dated = self.research(PMG_URL, 'Face Type: Portrait J. Sigurdsson at left.')
+        dated['identity']['date_1'] = 1948
+        self.assertEqual(lookup.validate(ICELAND, {}, dated, self.pmg())['rejected'], {'identity': 'differs_date_1'})
+
+
 if __name__ == '__main__':
     unittest.main()

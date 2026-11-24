@@ -29474,8 +29474,11 @@ def _banknote_check_result(note, prepared, suggestions, lookup_error=None, looku
             catalogue.update(state='matched', message='The matching catalogue confirms the saved details.')
         else:
             catalogue.update(state='unresolved', message='No additional catalogue details could be confirmed for this note.')
-    app.logger.info('Catalogue validation summary: state=%s accepted_fields=%s',
-        catalogue['state'], ','.join(sorted(catalogue['fields'])))
+    # Reason codes and catalogue domains only (no values or full URLs), so a
+    # rejected field can be diagnosed from the log (Iceland P-33a, 2026-11-24).
+    app.logger.info('Catalogue validation summary: state=%s accepted_fields=%s rejected=%s',
+        catalogue['state'], ','.join(sorted(catalogue['fields'])),
+        ','.join(f'{field}:{reason}' for field, reason in sorted((catalogue.get('rejected') or {}).items())))
     catalogue['guard'] = dict(identity=banknote_catalog_lookup.identity_snapshot(note),
                               fields=list(catalogue['fields']))
     if catalogue['fields'] and db is not None:
