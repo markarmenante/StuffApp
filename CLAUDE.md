@@ -64,6 +64,13 @@ fold new standing instructions in here — nowhere else.)
   rule. See `docs/code-review-2026-11-23.md`.
 - **Commit and push directly to `main`.** No draft-PR round-trips — `main` is
   the deploy branch; Railway auto-deploys it.
+- **Local and cloud stay in sync** (2026-11-24): the Mac's Today updater
+  fast-forwards `~/GitHub/StuffApp` (and every other `~/GitHub` checkout) to
+  GitHub every five minutes while the Mac is awake, and pushes committed
+  local work after a 10-minute grace. Don't ask Mark to pull; check
+  `http://localhost:5170/api/repo-sync`. Untracked files that collide with an
+  incoming file block the update and are named there; move them aside,
+  never delete them. Details: boardroom `apps/today/CLAUDE.md` (repo sync).
 - **Shared connections and pathways** (2026-10-04): read this repo's
   `CONNECTORS.md` and its canonical registry before integration work. Reuse
   existing approved adapters within their account/scope/runtime boundaries;
@@ -118,10 +125,14 @@ fold new standing instructions in here — nowhere else.)
     MCP connectors return variable names only, and the Mac is reachable
     only when a local session appears in ListAgents. The claude.ai
     environment's own env config is the reuse recipe for cloud
-    sessions — and as of 2026-08-17 the Default environment CARRIES
-    `ANTHROPIC_API_KEY` (and `BOARD_DATABASE_URL`), so sessions started
-    after that date can run model-dependent code (trim pipeline, Check
-    prompts, country histories) directly in the sandbox. If the var is
+    sessions. As of 2026-11-24 the cloud environment (`cloud_default`)
+    does NOT carry `ANTHROPIC_API_KEY`; production does (Doppler →
+    Railway shared variables). Don't ask Mark to add it: exercise
+    model-dependent code server-side (press ✓ Check on the record in the
+    built-in browser, which is signed in to Cloudflare Access, and read
+    the `Catalogue … summary` lines from Railway logs). The Anthropic API
+    never receives claude.ai "network secrets", so only an environment
+    variable would put the key in the sandbox. If the var is
     missing, check you're in the Default environment before assuming
     it's gone.
   - To reach the Mac from a cloud session: Claude Code is already
