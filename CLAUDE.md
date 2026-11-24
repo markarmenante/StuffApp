@@ -365,9 +365,14 @@ URLs, purchase details or credentials are logged by these summaries.
 
 Catalogue values fill blank fields. Sourced portrait, design, lettering and
 translation replacements enter the existing explicit correction review. The
-country and full reference drive both paths. Fetched Numista and Banknote World
-entries can recover named portraits and type details even if model extraction
-is empty. Lookup returns per-field proofs plus `catalogue.guard` and raw
+country and full reference drive both paths. Fetched Numista, Banknote World
+and Realbanknotes entries can recover named portraits and type details even if
+model extraction is empty. Standard Catalog face text ("Portrait J. Sigurdsson
+at left", used by PMG and Realbanknotes) names the portrait; a full name may
+expand an initial when the quoted surname matches. While the portrait is blank,
+the search plan's fourth query looks for the exact Realbanknotes entry.
+Matching folds accents (Krónur = Kronur, Íslands = Islands). Regression:
+Iceland P-33a (2026-11-24), where Numista never names the portrait. Lookup returns per-field proofs plus `catalogue.guard` and raw
 `expected_values`. Server proposals also bind each original target value. The banknote detail UI
 flushes current edits (including intentional clears), fences in-flight edits,
 and sends the guard to apply. Apply acquires a SQLite write lock before comparing

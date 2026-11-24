@@ -551,5 +551,73 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response['skipped_fields'], ['price'])
 
 
+RBN_URL = 'https://www.realbanknotes.com/banknote/22819-Iceland-p33a-10-Kronur-from-1928'
+ICELAND = dict(country='Iceland', pick_number='P-33a', denomination='10 Krónur', issuer='Landsbanki Íslands',
+               date_1=1928, printer='Bradbury, Wilkinson & Co.')
+RBN_TEXT = """Iceland p33a: 10 Kronur from 1928
+Front of Iceland p33a: 10 Kronur from 1928
+L.1928 (1948). Red on multicolor underprint. Portrait J. Sigurdsson at left. Signature of Bank Director at left, Bank Governor at right. Back: Waterfalls at right. Printer: BWC. Without serial # prefix.
+* Country & Pick Number:Iceland p33a
+* Denomination & Currency:10 Kronur
+* First Year of Issue:1928
+* Issuer:Landsbanki Islands
+Iceland 10 Kronur 1928 (1934) $9.99 USD"""
+RBN_SENTENCE = RBN_TEXT.splitlines()[2]
+
+
+class StandardCatalogPortraitTests(unittest.TestCase):
+    """Iceland P-33a (2026-11-24): the portrait is named only in Standard
+    Catalog face text, "Portrait J. Sigurdsson at left", which Check missed."""
+
+    def test_standard_catalog_and_numista_phrasings(self):
+        self.assertEqual(lookup.portrait_name(RBN_SENTENCE), 'J. Sigurdsson')
+        self.assertEqual(lookup.portrait_name('Left side portrait of Jón Sigurðsson. Right side watermark field.'), 'Jón Sigurðsson')
+        self.assertEqual(lookup.portrait_name('Portrait of Jón Sigurdsson at left, watermark field at right side.'), 'Jón Sigurdsson')
+        self.assertEqual(lookup.portrait_name('Portrait Queen Elizabeth II at right.'), 'Queen Elizabeth II')
+        for generic in ('Portrait at left.', 'Red on multicolor underprint.', 'Portrait of a woman at left.', 'portrait of bearded man'):
+            self.assertIsNone(lookup.portrait_name(generic), generic)
+
+    def test_full_name_supported_by_initial_and_same_surname_only(self):
+        self.assertTrue(lookup.portrait_supported(RBN_SENTENCE, 'Jón Sigurðsson'))
+        self.assertTrue(lookup.portrait_supported(RBN_SENTENCE, 'J. Sigurdsson'))
+        self.assertFalse(lookup.portrait_supported(RBN_SENTENCE, 'Jón Eiríksson'))
+        self.assertFalse(lookup.portrait_supported(RBN_SENTENCE, 'Einar Sigurdsson'))
+        self.assertFalse(lookup.portrait_supported(RBN_SENTENCE, 'Sigurdsson'))
+
+    def test_accents_fold_for_unaccented_catalogues(self):
+        self.assertEqual(lookup.folded('10 Krónur'), lookup.folded('10 Kronur'))
+        self.assertEqual(lookup.folded('Landsbanki Íslands'), lookup.folded('Landsbanki Islands'))
+
+    def research(self, value, quote=RBN_SENTENCE):
+        identity = {field: ICELAND.get(field) for field in lookup.IDENTITY_FIELDS}
+        identity.update(match='exact', reference='P-33a', variety_dates=[])
+        return dict(identity=identity, fields={'official': dict(value=value, scope='type', source_url=RBN_URL, quote=quote)})
+
+    def rbn_sources(self, document=RBN_TEXT):
+        return {RBN_URL: dict(title='Iceland p33a: 10 Kronur from 1928', quotes=[document], document_text=document)}
+
+    def test_model_portrait_from_exact_realbanknotes_entry_is_accepted(self):
+        result = lookup.validate(ICELAND, {}, self.research('Jón Sigurðsson'), self.rbn_sources())
+        self.assertEqual(result['state'], 'ready')
+        self.assertEqual(result['fields']['official']['value'], 'Jón Sigurðsson')
+
+    def test_wrong_person_or_other_reference_is_rejected(self):
+        self.assertEqual(lookup.validate(ICELAND, {}, self.research('Jón Eiríksson'), self.rbn_sources())['fields'], {})
+        other = RBN_TEXT.replace('p33a', 'p28a')
+        self.assertEqual(lookup.validate(ICELAND, {}, self.research('Jón Sigurðsson'), self.rbn_sources(other))['fields'], {})
+
+    def test_structured_fallback_reads_the_single_portrait(self):
+        entries = list(lookup.structured_research(ICELAND, self.rbn_sources()))
+        self.assertEqual([e['fields']['official']['value'] for e in entries], ['J. Sigurdsson'])
+        result = lookup.validate(ICELAND, {}, entries[0], self.rbn_sources())
+        self.assertEqual(result['fields']['official']['value'], 'J. Sigurdsson')
+        two = RBN_TEXT + '\nL.1928. Brown. Portrait J. Eiriksson at left.'
+        self.assertEqual(list(lookup.structured_research(ICELAND, self.rbn_sources(two))), [])
+
+    def test_search_plan_adds_realbanknotes_only_while_portrait_is_blank(self):
+        self.assertIn('4. site:realbanknotes.com Iceland p33a', lookup.prompt(dict(ICELAND, official='')))
+        self.assertNotIn('site:realbanknotes.com', lookup.prompt(dict(ICELAND, official='Jón Sigurðsson')))
+
+
 if __name__ == '__main__':
     unittest.main()

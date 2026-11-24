@@ -4,6 +4,7 @@ Pure helpers: no database, provider, file, or collection writes. The existing
 Check adapter supplies actual provider citations, not model-invented URLs.
 """
 import re
+import unicodedata
 from urllib.parse import urlsplit, parse_qs
 
 import banknote_catalog as catalog
@@ -204,7 +205,7 @@ Observed URLs: %s
 Known identity (preserve each nonempty value): %s
 Return one JSON object containing catalogue_research with identity {match:"exact|unresolved",country,reference,denomination,issuer,series,date_1,date_1_text,date_2,date_2_text,state,variety_dates:[]} (variety_dates contains Gregorian integer years, e.g. [1960], never date strings) and fields {field:{value,scope:"type|variety",source_url,quote}}.
 Research only these missing type fields: %s. Use actual fetched text or supplied native excerpts for every short literal field quote. The full catalogue namespace/reference including suffix and country must match. Do not use another variety. Include the actual full fetched URL as source_url.
-For stable printer/material/dimensions a matching type-wide page is sufficient. Numista can list a parent Pick type in Features (P-55) and the complete reference (P-55c) in its issue table: read that table to confirm the saved reference and date, then use the shared Features dimensions. A parent number alone or sale offer is insufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Sourced replacements for official, obv_rev, lettering and lettering_translation are eligible for explicit review. Restrict replacement proposals to those four design fields. Identify named people and places from the matching catalogue entry. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
+For stable printer/material/dimensions a matching type-wide page is sufficient. Numista can list a parent Pick type in Features (P-55) and the complete reference (P-55c) in its issue table: read that table to confirm the saved reference and date, then use the shared Features dimensions. A parent number alone or sale offer is insufficient. Known issuer must not conflict; a country-only catalogue issuer heading is acceptable for Pick/TBB. Signatures, watermark/date/series require a uniquely dated variety and exact full names must be literally stated. If uncertain leave absent. Never return grade, serial, certificate, purchase or photo fields. Sourced replacements for official, obv_rev, lettering and lettering_translation are eligible for explicit review. Restrict replacement proposals to those four design fields. Identify named people and places from the matching catalogue entry. Standard Catalog face text such as "Portrait J. Sigurdsson at left" (PMG, Realbanknotes) names the official portrait: when official is missing, return it from that exact-reference sentence, quoting it; the value may spell out a given name the quote abbreviates to its initial, keeping the quoted surname. Return exact numeric millimetres for dimensions and literal sourced text for other fields. Format obv_rev as "Obv: literal front description / Rev: literal back description", scope=type for a shared design. Do not translate a catalogue issue category into a guessed app category.
 ''' % (json.dumps(native_sources or {}), json.dumps(configured), json.dumps(observed), json.dumps(identity), ', '.join(research_fields(note)))
 
 
@@ -234,7 +235,11 @@ def actual_sources(responses):
 
 
 def folded(value):
-    return re.sub(r'[^a-z0-9]+', ' ', text(value).casefold()).strip()
+    # Accents fold to their base letters (Krónur = Kronur, Íslands = Islands),
+    # so an unaccented catalogue still matches the saved spelling (2026-11-24).
+    value = unicodedata.normalize('NFKD', text(value).translate(_NAME_LETTERS))
+    value = ''.join(c for c in value if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9]+', ' ', value.casefold()).strip()
 
 
 def reference(value):
@@ -412,15 +417,53 @@ def _numista_type_features(note, url, source):
     return features[1]
 
 
+_PORTRAIT_SIDE = r'\s+(?:at|to the)\s+(?:(?:upper|lower|top|bottom)\s+)?(?:left|right|center|centre|top|bottom)\b'
+
+
 def portrait_name(description):
+    """The person a catalogue face description names.
+
+    "Portrait of Jón Sigurðsson at left" and the Standard Catalog's own
+    "Portrait J. Sigurdsson at left" (PMG, Realbanknotes, NumisMaster) both
+    name the portrait (Iceland P-33a, 2026-11-24). A sentence ends at a
+    period after a lowercase letter, never at an initial such as "J.".
+    """
+    description = text(description)
     match = re.search(r'\b(?:portrait|bust) of ([^,;\n]+)', description, re.I)
     if not match:
+        match = re.search(r'\b(?:[Pp]ortrait|[Bb]ust)\s+(?!of\b)([A-Z][^,;\n]*?)(?=' + _PORTRAIT_SIDE + ')', description)
+    if not match:
         return None
-    name = re.split(r'\s+(?:at|flanked|facing)\s+', match[1], flags=re.I)[0].strip()
+    name = re.split(r'(?<=[a-zß-ÿ)])\.(?:\s|$)', match[1])[0]
+    name = re.split(r'\s+(?:at|flanked|facing|and|with)\s+', name, flags=re.I)[0].strip().rstrip('.')
     if (2 <= len(name.split()) <= 12 and len(name) <= 120 and name[0].isupper()
-            and not re.match(r'(?i)(?:a|an|the|unidentified|unknown|bearded|man|woman|figure)\b', name)):
+            and not re.match(r'(?i)(?:a|an|the|unidentified|unknown|bearded|man|woman|figure|left|right)\b', name)):
         return name
     return None
+
+
+_NAME_LETTERS = str.maketrans({'ð': 'd', 'Ð': 'D', 'þ': 'th', 'Þ': 'Th', 'æ': 'ae', 'Æ': 'Ae',
+                               'ø': 'o', 'Ø': 'O', 'ß': 'ss', 'ł': 'l', 'Ł': 'L', 'œ': 'oe', 'Œ': 'Oe'})
+
+
+def _name_words(value):
+    value = unicodedata.normalize('NFKD', text(value).translate(_NAME_LETTERS))
+    return re.findall(r'[a-z]+', ''.join(c for c in value if not unicodedata.combining(c)).casefold())
+
+
+def portrait_supported(quote, value):
+    """A portrait name is supported when the source names the same person,
+    allowing initials for given names: "Portrait J. Sigurdsson at left"
+    supports "Jón Sigurðsson". The surname must be literally present."""
+    words = _name_words(value)
+    if len(words) < 2:
+        return False
+    surname, first = words[-1], words[0]
+    quoted = _name_words(quote)
+    for index, word in enumerate(quoted):
+        if word == surname and any(token in (first, first[0]) for token in quoted[max(0, index - 3):index]):
+            return True
+    return False
 
 
 def _banknoteworld_research(note, url, source):
@@ -477,6 +520,44 @@ def _banknoteworld_research(note, url, source):
     return dict(identity=identity, fields=fields)
 
 
+def _realbanknotes_research(note, url, source):
+    """The Standard Catalog face description on an exact Realbanknotes entry.
+
+    Realbanknotes publishes one page per complete reference ("Iceland p33a")
+    with the catalogue's face text, e.g. "Portrait J. Sigurdsson at left".
+    Only a page naming every saved reference and exactly one portrait counts.
+    """
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme != 'https' or parsed.port not in (None, 443) or parsed.username or parsed.password:
+            return None
+    except (TypeError, ValueError):
+        return None
+    document = source.get('document_text')
+    if (parsed.hostname not in ('realbanknotes.com', 'www.realbanknotes.com')
+            or not parsed.path.startswith('/banknote/') or not isinstance(document, str)):
+        return None
+    keys = references(note)
+    if (not keys or not all(reference_in(document, key) for key in keys)
+            or not country_in(document[:3000], catalog.canonical_country(note['country']))):
+        return None
+    sentences = [line.strip() for line in document.splitlines() if re.search(r'\b(?:[Pp]ortrait|[Bb]ust)\b', line)]
+    named = {}
+    for sentence in sentences:
+        name = portrait_name(sentence)
+        if name:
+            named.setdefault(name, sentence)
+    if len(named) != 1:
+        return None
+    name, sentence = next(iter(named.items()))
+    if len(sentence) > 1500:
+        return None
+    ref = next((part.strip() for field in ('pick_number', 'other_catalog')
+                for part in re.split(r'[,;]', text(note.get(field))) if reference(part)), None)
+    return dict(identity=dict(identity_snapshot(note), match='exact', reference=ref, variety_dates=[]),
+                fields=dict(official=dict(value=name, scope='type', source_url=url, quote=sentence)))
+
+
 def structured_research(note, sources):
     """Recover explicit type facts from actual single-entry Numista text.
 
@@ -492,7 +573,7 @@ def structured_research(note, sources):
                 for part in re.split(r'[,;]', text(note.get(field)))
                 if reference(part)), None)
     for url, source in sources.items():
-        entry = _banknoteworld_research(note, url, source)
+        entry = _banknoteworld_research(note, url, source) or _realbanknotes_research(note, url, source)
         if entry:
             yield entry
         feature_text = _numista_type_features(note, url, source)
@@ -728,7 +809,7 @@ def validate(note, recovered, research, sources, *, allow_review=False):
             value = field_value(field, entry)
         except (TypeError, ValueError):
             continue
-        if not contains(quote, value):
+        if not contains(quote, value) and not (field == 'official' and portrait_supported(quote, value)):
             if field not in ('obv_rev', 'lettering', 'lettering_translation'):
                 continue
             parts = re.split(r'\s*/\s*|\n', str(value))
@@ -763,6 +844,10 @@ def prompt(note):
             query_plan += '2. ' + country + ' ' + semantic_ref + ' banknote\n'
             compact_ref = ('P' + ref_number) if namespace == 'pick' else semantic_ref
             query_plan += '3. site:banknoteindex.com ' + country + ' ' + compact_ref + '\n'
+            if namespace == 'pick' and is_blank(note.get('official')):
+                # Realbanknotes carries the Standard Catalog face text, which
+                # names the portrait ("Portrait J. Sigurdsson at left").
+                query_plan += '4. site:realbanknotes.com ' + country + ' p' + ref_number + '\n'
         query_plan += ('Execute all listed queries to discover independent fallback sources before page verification. '
                        'Only the FIRST query may restrict Numista. Do not add printer, dimensions, or other field words to the queries. '
                        'Never repeat Numista-only variants. '
@@ -805,7 +890,7 @@ Only use image when that evidence is visible in an actually attached image;
 dealer quotes must occur verbatim in the supplied description/purchase text.
 For facts found ONLY on the web, leave their ordinary top-level fields null and
 put them ONLY in catalogue_research below. Top-level fields remain direct
-image/dealer evidence. Research named people, places and complete designs even when a generic image caption already occupies official or obv_rev. Sourced replacements for official, obv_rev, lettering and lettering_translation go through explicit review. Restrict replacements to those four design fields. Never research purchase,
+image/dealer evidence. Research named people, places and complete designs even when a generic image caption already occupies official or obv_rev. Catalogue face text such as "Portrait J. Sigurdsson at left" names the official portrait. Sourced replacements for official, obv_rev, lettering and lettering_translation go through explicit review. Restrict replacements to those four design fields. Never research purchase,
 serial, certificate, grade, photos, ownership or storage facts from a catalogue.
 Use actual field evidence, not memory. In a short paragraph BEFORE the final
 JSON cite the source excerpts with native web-search citations. The cited
